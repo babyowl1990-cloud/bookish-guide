@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIPHERVAULT // Identity &amp; Credential Vault</title>
+<!-- Optional strength analyzer: falls back to a local heuristic if this fails to load (e.g. offline) -->
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js" onerror="window.__zxcvbnFailed=true"></script>
+<style>
+:root{
+  --bg:#06070d;
+  --bg2:#0b0e18;
+  --panel:#0d1220;
+  --panel2:#111827;
+  --line:#1c2438;
+  --cyan:#2de2ff;
+  --magenta:#ff2ee0;
+  --magenta-dim:#ff2ee055;
+  --green:#39ff9c;
+  --yellow:#ffd23f;
+  --red:#ff4d5e;
+  --text:#d7e6ff;
+  --dim:#6f7fa0;
+  --font: 'Consolas','Menlo','Courier New',monospace;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  background:
+    radial-gradient(circle at 20% 10%, #1a0f2e33, transparent 40%),
+    radial-gradient(circle at 80% 90%, #0f2438, transparent 40%),
+    repeating-linear-gradient(0deg, #ffffff05 0px, #ffffff05 1px, transparent 1px, transparent 3px),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  letter-spacing:.02em;
+  min-height:100vh;
+}
+::selection{ background:var(--magenta); color:#000; }
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:var(--bg2);}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:0;}
+::-webkit-scrollbar-thumb:hover{background:var(--cyan);}
+
+.scanlines{
+  pointer-events:none; position:fixed; inset:0; z-index:9999; opacity:.05;
+  background:repeating-linear-gradient(0deg, #fff 0px, #fff 1px, transparent 1px, transparent 2px);
+  mix-blend-mode:overlay;
+}
+
+.bracket{position:relative;}
+.bracket::before,.bracket::after{
+  content:''; position:absolute; width:14px; height:14px; border:2px solid var(--cyan); opacity:.7;
+}
+.bracket::before{ top:-2px; left:-2px; border-right:none; border-bottom:none; }
+.bracket::after{ bottom:-2px; right:-2px; border-left:none; border-top:none; }
+
+.warn-banner{
+  background:repeating-linear-gradient(135deg,#2a0b0b,#2a0b0b 10px,#3a0f0f 10px,#3a0f0f 20px);
+  border-bottom:2px solid var(--red);
+  color:#ffdada;
+  padding:10px 16px;
+  font-size:12.5px;
+  text-align:center;
+  letter-spacing:.03em;
+  position:sticky; top:0; z-index:500;
+}
+.warn-banner b{color:var(--red);}
+
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 22px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, #0d1220, #090c15);
+}
+.brand{ display:flex; align-items:center; gap:10px; }
+.brand-mark{
+  width:30px;height:30px; border:2px solid var(--magenta); position:relative;
+  display:flex; align-items:center; justify-content:center; color:var(--magenta); font-weight:bold;
+  box-shadow:0 0 12px var(--magenta-dim);
+}
+.brand h1{ font-size:16px; margin:0; letter-spacing:.12em; color:#fff; text-shadow:0 0 10px var(--cyan); }
+.brand small{ display:block; color:var(--dim); font-size:10px; letter-spacing:.15em; }
+.status-pill{
+  font-size:10px; padding:4px 10px; border:1px solid var(--line); color:var(--dim); letter-spacing:.1em;
+}
+.status-pill.unlocked{ color:var(--green); border-color:var(--green); }
+.status-pill.locked{ color:var(--red); border-color:var(--red); }
+
+.topbar-actions{ display:flex; gap:8px; align-items:center; }
+
+button{
+  font-family:var(--font); cursor:pointer; letter-spacing:.05em;
+  background:var(--panel2); color:var(--text); border:1px solid var(--line);
+  padding:9px 14px; font-size:12px; transition:all .15s ease;
+}
+button:hover{ border-color:var(--cyan); color:var(--cyan); box-shadow:0 0 10px #2de2ff33; }
+button:active{ transform:translateY(1px); }
+button.primary{ border-color:var(--magenta); color:var(--magenta); }
+button.primary:hover{ background:var(--magenta); color:#06070d; box-shadow:0 0 16px var(--magenta); }
+button.ghost{ background:transparent; }
+button.danger{ border-color:var(--red); color:var(--red); }
+button.danger:hover{ background:var(--red); color:#06070d; box-shadow:0 0 16px var(--red); }
+button.sm{ padding:5px 9px; font-size:10.5px; }
+button:disabled{ opacity:.4; cursor:not-allowed; }
+
+input, textarea, select{
+  font-family:var(--font); background:#080b14; color:var(--text);
+  border:1px solid var(--line); padding:10px 11px; font-size:13px; width:100%;
+  outline:none;
+}
+input:focus, textarea:focus, select:focus{ border-color:var(--cyan); box-shadow:0 0 0 1px #2de2ff55; }
+label{ display:block; font-size:10.5px; color:var(--dim); letter-spacing:.1em; margin:10px 0 4px; text-transform:uppercase; }
+textarea{ resize:vertical; min-height:70px; }
+
+.hidden{ display:none !important; }
+
+/* ---------- LOCK / SETUP SCREEN ---------- */
+.center-screen{
+  min-height:calc(100vh - 90px); display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.lock-card{
+  width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line); padding:30px 26px;
+  position:relative;
+}
+.lock-card h2{ margin:0 0 4px; font-size:15px; letter-spacing:.1em; color:#fff; }
+.lock-card p.sub{ color:var(--dim); font-size:11.5px; margin:0 0 18px; line-height:1.6; }
+.strength-bar{ height:5px; background:#161c2c; margin-top:6px; position:relative; overflow:hidden; }
+.strength-bar i{ display:block; height:100%; width:0%; transition:width .2s, background .2s; }
+.strength-label{ font-size:10.5px; margin-top:4px; letter-spacing:.08em; }
+.err-msg{ color:var(--red); font-size:11.5px; margin-top:10px; min-height:14px; }
+.field-row{ display:flex; gap:8px; align-items:stretch; }
+.field-row input{ flex:1; }
+
+/* ---------- LAYOUT ---------- */
+.app{ display:flex; min-height:calc(100vh - 40px); }
+.sidebar{
+  width:210px; border-right:1px solid var(--line); background:var(--bg2); padding:16px 0; flex-shrink:0;
+}
+.sidebar h3{ font-size:9.5px; color:var(--dim); padding:0 16px; letter-spacing:.15em; margin:16px 0 6px; }
+.nav-item{
+  display:flex; align-items:center; gap:9px; padding:10px 16px; color:var(--dim); font-size:12.5px;
+  cursor:pointer; border-left:2px solid transparent;
+}
+.nav-item:hover{ color:var(--text); background:#ffffff06; }
+.nav-item.active{ color:var(--cyan); border-left-color:var(--cyan); background:#2de2ff0d; }
+.nav-count{ margin-left:auto; font-size:10px; color:var(--dim); }
+
+.main{ flex:1; padding:22px 26px; min-width:0; }
+.panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+.panel-head h2{ font-size:15px; letter-spacing:.08em; color:#fff; margin:0; }
+.panel-head .sub{ color:var(--dim); font-size:11px; }
+
+.toolbar{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.toolbar input[type=text]{ max-width:260px; }
+
+.grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+.card{
+  background:var(--panel); border:1px solid var(--line); padding:14px; position:relative; transition:border-color .15s;
+}
+.card:hover{ border-color:var(--cyan); }
+.card .row1{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.card .title{ font-size:13px; color:#fff; font-weight:bold; word-break:break-word; }
+.card .tag{ font-size:9px; padding:2px 6px; border:1px solid var(--line); color:var(--dim); letter-spacing:.08em; white-space:nowrap; }
+.card .field{ font-size:11.5px; color:var(--dim); margin-top:8px; display:flex; justify-content:space-between; align-items:center; gap:6px; }
+.card .field span.val{ color:var(--text); font-family:var(--font); }
+.card .actions{ display:flex; gap:6px; margin-top:12px; }
+.mono-mask{ letter-spacing:2px; }
+.flag{ font-size:9.5px; padding:2px 6px; margin-top:8px; display:inline-block; border:1px solid; }
+.flag.reused{ color:var(--yellow); border-color:var(--yellow); }
+.flag.breached{ color:var(--red); border-color:var(--red); }
+.flag.weak{ color:var(--red); border-color:var(--red); }
+.flag.strong{ color:var(--green); border-color:var(--green); }
+
+.empty-state{ color:var(--dim); font-size:12.5px; padding:40px 20px; text-align:center; border:1px dashed var(--line); }
+
+/* ---------- MODAL ---------- */
+.overlay{
+  position:fixed; inset:0; background:#000000cc; backdrop-filter:blur(2px); z-index:800;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.modal{
+  width:100%; max-width:520px; max-height:88vh; overflow-y:auto; background:var(--panel);
+  border:1px solid var(--cyan); box-shadow:0 0 40px #2de2ff22; padding:22px;
+}
+.modal h3{ margin:0 0 4px; font-size:14px; letter-spacing:.08em; color:#fff; }
+.modal .close-x{ float:right; }
+.two-col{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+
+.toast-wrap{ position:fixed; bottom:18px; right:18px; z-index:1000; display:flex; flex-direction:column; gap:8px; }
+.toast{
+  background:var(--panel2); border:1px solid var(--cyan); padding:10px 16px; font-size:12px; color:var(--text);
+  box-shadow:0 0 14px #2de2ff33; animation:slidein .2s ease;
+}
+.toast.err{ border-color:var(--red); box-shadow:0 0 14px #ff4d5e33; }
+@keyframes slidein{ from{transform:translateX(20px);opacity:0;} to{transform:translateX(0);opacity:1;} }
+
+.copybtn{ color:var(--cyan); cursor:pointer; border:none; background:none; font-family:var(--font); font-size:10.5px; padding:2px 4px; }
+.copybtn:hover{ text-shadow:0 0 8px var(--cyan); }
+
+.sec-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:18px; }
+.stat-box{ background:var(--panel); border:1px solid var(--line); padding:16px; text-align:center; }
+.stat-box .num{ font-size:26px; font-weight:bold; color:var(--cyan); text-shadow:0 0 10px #2de2ff55; }
+.stat-box.red .num{ color:var(--red); text-shadow:0 0 10px #ff4d5e55; }
+.stat-box.yellow .num{ color:var(--yellow); text-shadow:0 0 10px #ffd23f55; }
+.stat-box.green .num{ color:var(--green); text-shadow:0 0 10px #39ff9c55; }
+.stat-box .lbl{ font-size:10px; color:var(--dim); letter-spacing:.1em; margin-top:6px; }
+
+.list-issue{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid var(--line); margin-bottom:8px; font-size:12px; }
+.list-issue .l-title{ color:#fff; }
+.list-issue .l-note{ color:var(--dim); font-size:10.5px; }
+
+.totp-code{ font-size:26px; letter-spacing:6px; color:var(--green); text-shadow:0 0 10px #39ff9c66; }
+.totp-ring{ position:relative; width:34px; height:34px; }
+.totp-ring svg{ transform:rotate(-90deg); }
+.totp-ring circle{ fill:none; stroke-width:3; }
+
+.settings-block{ background:var(--panel); border:1px solid var(--line); padding:18px; margin-bottom:14px; max-width:640px; }
+.settings-block h4{ margin:0 0 10px; font-size:12.5px; color:var(--cyan); letter-spacing:.08em; }
+.settings-block p{ font-size:11.5px; color:var(--dim); line-height:1.6; margin:4px 0 12px; }
+.checkbox-row{ display:flex; align-items:center; gap:8px; font-size:12px; margin:8px 0; }
+.checkbox-row input{ width:auto; }
+
+.note-box{ background:#0d1220; border-left:2px solid var(--yellow); padding:10px 12px; font-size:11px; color:#e8dfb8; margin:10px 0; line-height:1.6; }
+.note-box.info{ border-left-color:var(--cyan); color:#bfe9ff; }
+.note-box.warn2{ border-left-color:var(--red); color:#ffd6d6; }
+
+.tag-chip{ display:inline-block; font-size:9px; padding:2px 7px; margin:2px 4px 0 0; border:1px solid var(--magenta); color:var(--magenta); letter-spacing:.05em; cursor:pointer; }
+.tag-chip:hover{ background:var(--magenta); color:#06070d; }
+.folder-badge{ display:inline-block; font-size:9.5px; padding:2px 7px; margin-top:6px; border:1px solid var(--cyan); color:var(--cyan); letter-spacing:.05em; cursor:pointer; }
+.folder-badge:hover{ background:var(--cyan); color:#06070d; }
+.folder-nav-item{ display:flex; align-items:center; gap:8px; padding:7px 16px; color:var(--dim); font-size:11.5px; cursor:pointer; border-left:2px solid transparent; }
+.folder-nav-item:hover{ color:var(--text); }
+.folder-nav-item.active{ color:var(--cyan); border-left-color:var(--cyan); }
+
+.history-toggle{ font-size:10.5px; color:var(--cyan); cursor:pointer; margin-top:10px; display:inline-block; }
+.history-toggle:hover{ text-shadow:0 0 6px var(--cyan); }
+.history-list{ margin-top:8px; border:1px solid var(--line); padding:8px; }
+.history-row{ display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:5px 0; border-bottom:1px solid var(--line); }
+.history-row:last-child{ border-bottom:none; }
+.history-row .h-pw{ color:var(--dim); letter-spacing:1px; }
+.history-row .h-date{ color:var(--dim); font-size:9.5px; }
+
+@media (max-width:800px){
+  .app{ flex-direction:column; }
+  .sidebar{ width:100%; display:flex; overflow-x:auto; padding:8px; border-right:none; border-bottom:1px solid var(--line);}
+  .sidebar h3{ display:none; }
+  .nav-item{ border-left:none; border-bottom:2px solid transparent; white-space:nowrap; }
+  .nav-item.active{ border-bottom-color:var(--cyan); }
+  .main{ padding:16px; }
+  .two-col{ grid-template-columns:1fr; }
+}
+
+/* ---------------- emergency kit (screen preview + print) ---------------- */
+.kit-page{
+  max-width:680px; margin:30px auto; background:#0d1220; border:1px solid var(--line); padding:36px;
+  font-family:var(--font); color:var(--text); line-height:1.7;
+}
+.kit-page h1{ font-size:18px; color:#fff; letter-spacing:.05em; border-bottom:2px solid var(--cyan); padding-bottom:10px; }
+.kit-page h3{ color:var(--cyan); font-size:13px; letter-spacing:.06em; margin-top:26px; }
+.kit-sub{ color:var(--dim); font-size:11.5px; }
+.kit-note{ color:var(--dim); font-size:10.5px; font-style:italic; }
+.kit-writebox{ border:1px dashed var(--dim); padding:14px; margin:10px 0; }
+.kit-writeline{ border-bottom:1px solid var(--dim); height:26px; }
+.kit-footer{ margin-top:30px; font-size:10px; color:var(--dim); border-top:1px solid var(--line); padding-top:14px; }
+@media print{
+  body *{ visibility:hidden; }
+  .warn-banner, .scanlines, .toast-wrap{ display:none !important; }
+  #emergencyKitView, #emergencyKitView *{ visibility:visible; }
+  #emergencyKitView{ position:absolute; left:0; top:0; width:100%; }
+  #emergencyKitView button{ display:none; }
+  .kit-page{ background:#fff; color:#000; border:none; max-width:100%; }
+  .kit-page h1, .kit-page h3{ color:#000; }
+  .kit-sub, .kit-note, .kit-footer{ color:#333; }
+  .kit-writebox, .kit-writeline{ border-color:#000; }
+}
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div class="warn-banner">
+  ⚠ <b>EXPERIMENTAL / TESTING BUILD.</b> This is a hobby project, not audited or professionally reviewed. Don't rely on it as your only password manager — keep a backup elsewhere and don't trust it with anything you can't afford to lose access to.
+</div>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">◈</div>
+    <div>
+      <h1>CIPHERVAULT</h1>
+      <small>local encrypted credential store</small>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span id="statusPill" class="status-pill locked">● LOCKED</span>
+    <button id="lockBtn" class="sm hidden" onclick="lockVault()">Lock</button>
+  </div>
+</div>
+
+<!-- ============ SETUP / UNLOCK ============ -->
+<div id="authScreen" class="center-screen">
+  <div id="setupCard" class="lock-card bracket hidden">
+    <h2>INITIALIZE VAULT</h2>
+    <p class="sub">No vault found on this device. Choose a master password. This password is never stored anywhere — if you lose it, your data is unrecoverable by design.</p>
+    <label>Master Password</label>
+    <input type="password" id="setupPw" oninput="updateStrength()" placeholder="••••••••••••">
+    <div class="strength-bar"><i id="strengthFill"></i></div>
+    <div class="strength-label" id="strengthLabel">&nbsp;</div>
+    <label>Confirm Master Password</label>
+    <input type="password" id="setupPw2" placeholder="••••••••••••">
+    <div class="err-msg" id="setupErr"></div>
+    <button class="primary" style="width:100%;margin-top:14px;" onclick="createVault()">Create Vault →</button>
+    <div class="note-box info">PBKDF2-SHA256 (200,000 rounds) derives your encryption key. Data is encrypted with AES-256-GCM before it ever touches storage.</div>
+  </div>
+
+  <div id="unlockCard" class="lock-card bracket hidden">
+    <h2>VAULT LOCKED</h2>
+    <p class="sub">Enter your master password to decrypt.</p>
+    <label>Master Password</label>
+    <input type="password" id="unlockPw" placeholder="••••••••••••" onkeydown="if(event.key==='Enter')unlockVault()">
+    <div class="err-msg" id="unlockErr"></div>
+    <button class="primary" style="width:100%;margin-top:14px;" onclick="unlockVault()">Unlock →</button>
+    <div id="bioUnlockWrap"></div>
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button class="ghost sm" onclick="triggerImport()">Import Backup</button>
+      <button class="danger ghost sm" onclick="confirmPanicWipe()">Panic Wipe</button>
+    </div>
+    <input type="file" id="importFile" class="hidden" accept="application/json" onchange="importBackup(event)">
+  </div>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div id="appScreen" class="app hidden">
+  <div class="sidebar">
+    <h3>VAULT</h3>
+    <div class="nav-item active" data-view="all" onclick="setView('all')">◆ All Items <span class="nav-count" id="cnt-all">0</span></div>
+    <div class="nav-item" data-view="login" onclick="setView('login')">🔑 Logins <span class="nav-count" id="cnt-login">0</span></div>
+    <div class="nav-item" data-view="card" onclick="setView('card')">💳 Cards <span class="nav-count" id="cnt-card">0</span></div>
+    <div class="nav-item" data-view="note" onclick="setView('note')">📝 Secure Notes <span class="nav-count" id="cnt-note">0</span></div>
+    <div class="nav-item" data-view="recovery" onclick="setView('recovery')">🗝 Recovery Codes <span class="nav-count" id="cnt-recovery">0</span></div>
+    <div class="nav-item" data-view="totp" onclick="setView('totp')">⏱ 2FA / TOTP <span class="nav-count" id="cnt-totp">0</span></div>
+    <div class="nav-item" data-view="passkey" onclick="setView('passkey')">🪪 Passkey Log <span class="nav-count" id="cnt-passkey">0</span></div>
+    <div class="nav-item" data-view="trash" onclick="setView('trash')">🗑 Trash <span class="nav-count" id="cnt-trash">0</span></div>
+    <h3 id="foldersHeader" class="hidden">FOLDERS</h3>
+    <div id="folderNav"></div>
+    <h3>SYSTEM</h3>
+    <div class="nav-item" data-view="security" onclick="setView('security')">⚠ Security Audit</div>
+    <div class="nav-item" data-view="settings" onclick="setView('settings')">⚙ Settings</div>
+  </div>
+
+  <div class="main">
+    <div class="panel-head">
+      <div>
+        <h2 id="viewTitle">ALL ITEMS</h2>
+        <div class="sub" id="viewSub">Everything in your vault</div>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="searchBox" placeholder="search vault..." oninput="renderItems()">
+        <button class="primary" onclick="openAddModal()">+ Add Item</button>
+      </div>
+    </div>
+
+    <div id="itemsView"><div id="itemsGrid" class="grid"></div></div>
+
+    <!-- TRASH VIEW -->
+    <div id="trashView" class="hidden">
+      <div class="note-box">Deleted items sit here for 30 days before being permanently removed automatically. Restore anything you didn't mean to delete.</div>
+      <div id="trashGrid" class="grid"></div>
+    </div>
+
+    <!-- SECURITY VIEW -->
+    <div id="securityView" class="hidden">
+      <div class="sec-summary">
+        <div class="stat-box"><div class="num" id="secTotal">0</div><div class="lbl">TOTAL ITEMS</div></div>
+        <div class="stat-box yellow"><div class="num" id="secReused">0</div><div class="lbl">REUSED PASSWORDS</div></div>
+        <div class="stat-box red"><div class="num" id="secWeak">0</div><div class="lbl">WEAK PASSWORDS</div></div>
+        <div class="stat-box red"><div class="num" id="secBreached">0</div><div class="lbl">BREACHED (CHECKED)</div></div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <button class="primary" id="breachCheckBtn" onclick="runBreachCheck()">Run Breach Check (all logins)</button>
+        <span class="sub" style="margin-left:10px;">Uses HIBP k-anonymity API — sends only a partial hash, requires internet.</span>
+      </div>
+      <div class="note-box">Breach checking makes a network request to <b>api.pwnedpasswords.com</b> for each unique password (only the first 5 chars of its SHA-1 hash are sent — your real password never leaves the browser). Skip this if you want to stay fully offline.</div>
+      <h4 style="color:var(--cyan);font-size:12px;letter-spacing:.08em;margin:20px 0 8px;">REUSED PASSWORDS</h4>
+      <div id="reusedList"></div>
+      <h4 style="color:var(--cyan);font-size:12px;letter-spacing:.08em;margin:20px 0 8px;">WEAK PASSWORDS</h4>
+      <div id="weakList"></div>
+      <h4 style="color:var(--cyan);font-size:12px;letter-spacing:.08em;margin:20px 0 8px;">KNOWN BREACHED</h4>
+      <div id="breachedList"></div>
+    </div>
+
+    <!-- SETTINGS VIEW -->
+    <div id="settingsView" class="hidden">
+      <div class="settings-block">
+        <h4>AUTO-LOCK</h4>
+        <p>Lock the vault automatically after inactivity. Data stays encrypted on disk at all times — this just clears the decryption key from memory.</p>
+        <select id="autoLockSelect" onchange="saveSettings()">
+          <option value="0">Never (not recommended)</option>
+          <option value="60000">1 minute</option>
+          <option value="300000" selected>5 minutes</option>
+          <option value="900000">15 minutes</option>
+        </select>
+      </div>
+      <div class="settings-block">
+        <h4>CLIPBOARD</h4>
+        <div class="checkbox-row"><input type="checkbox" id="clipClearChk" checked onchange="saveSettings()"> Auto-clear clipboard <input type="number" id="clipClearSecs" value="20" style="width:60px;margin-left:6px;" onchange="saveSettings()"> seconds after copy</div>
+      </div>
+      <div class="settings-block">
+        <h4>LOCK ON FOCUS LOSS</h4>
+        <p>Instantly wipe the decryption key from memory when you switch tabs, alt-tab away, or minimize the window — not just after the inactivity timer. More paranoid, more disruptive to normal use — your call.</p>
+        <div class="checkbox-row"><input type="checkbox" id="lockOnBlurChk" checked onchange="saveSettings()"> Lock immediately on tab switch / window blur</div>
+      </div>
+      <div class="settings-block">
+        <h4>BIOMETRIC / PASSKEY QUICK UNLOCK</h4>
+        <p>Uses your device's fingerprint/face unlock or a security key (via the WebAuthn <code>prf</code> extension) to unlock without typing the master password. Support varies by browser and hardware — if it's not available, you'll just keep using the password, nothing breaks.</p>
+        <p style="color:var(--dim);font-size:10.5px;">Status: <span id="biometricStatus">checking…</span></p>
+        <button id="biometricEnableBtn" onclick="setupBiometric()">Enable Biometric Unlock</button>
+        <button id="biometricDisableBtn" class="danger ghost hidden" onclick="disableBiometric()">Disable Biometric Unlock</button>
+      </div>
+      <div class="settings-block">
+        <h4>MASTER PASSWORD</h4>
+        <label>Current Password</label>
+        <input type="password" id="curMpw">
+        <label>New Password</label>
+        <input type="password" id="newMpw" oninput="updateStrength('newMpw','newStrengthFill','newStrengthLabel')">
+        <div class="strength-bar"><i id="newStrengthFill"></i></div>
+        <div class="strength-label" id="newStrengthLabel">&nbsp;</div>
+        <button class="primary" style="margin-top:12px;" onclick="changeMasterPassword()">Change Master Password</button>
+        <div class="err-msg" id="changePwErr"></div>
+      </div>
+      <div class="settings-block">
+        <h4>BACKUP</h4>
+        <p>Export downloads your <b>still-encrypted</b> vault as a JSON file. It's useless without your master password, but treat it like any encrypted secret.</p>
+        <button onclick="exportBackup()">Export Encrypted Backup</button>
+      </div>
+      <div class="settings-block">
+        <h4>TRANSFER PASSWORDS (CSV)</h4>
+        <p>Move logins to or from other password managers (Chrome, Firefox, Bitwarden, 1Password, etc.) using the standard CSV format they all read. <b>Unlike the backup above, this file is plaintext</b> — anyone who opens it can read every password. Delete it as soon as you're done importing elsewhere.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="exportCSV()">Export Logins as CSV</button>
+          <button onclick="triggerImportCsv()">Import CSV</button>
+        </div>
+        <input type="file" id="importCsvFile" class="hidden" accept=".csv,text/csv" onchange="importCsv(event)">
+        <div class="note-box warn2">The exported file is not encrypted. Only logins (title/url/username/password/notes) transfer this way — cards, notes, recovery codes and 2FA secrets stay in the encrypted backup only, since most other managers don't have a matching field for them.</div>
+      </div>
+      <div class="settings-block">
+        <h4 style="color:var(--red);">DANGER ZONE</h4>
+        <p>Panic wipe permanently deletes the vault from this device. There is no undo unless you have an exported backup.</p>
+        <button class="danger" onclick="confirmPanicWipe()">Panic Wipe Vault</button>
+      </div>
+      <div class="settings-block">
+        <h4>EMERGENCY KIT</h4>
+        <p>Generates a printable page explaining how this vault's recovery works, with blank space to hand-write your master password and store it somewhere physically secure (a safe, a safety deposit box). This is paper, not the internet — treat it accordingly.</p>
+        <button onclick="printEmergencyKit()">Print Emergency Kit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="emergencyKitView" class="hidden">
+    <div class="kit-page">
+      <h1>CIPHERVAULT — EMERGENCY RECOVERY KIT</h1>
+      <p class="kit-sub">Generated <span id="kitDate"></span>. Keep this page somewhere physically secure — a safe, a locked drawer, a safety deposit box. Anyone holding this paper AND your backup file AND a copy of CipherVault can open your vault, so protect it like you would a spare house key.</p>
+
+      <h3>1. What you need to recover this vault</h3>
+      <ul>
+        <li>Your <b>encrypted backup file</b> (Settings → Backup → Export Encrypted Backup) — a copy of the vault's ciphertext.</li>
+        <li>Your <b>master password</b>, written by hand below.</li>
+        <li>A running copy of <b>CipherVault</b> (this HTML file) — any recent version can read the backup; open it in any modern browser.</li>
+      </ul>
+      <p>None of these three alone is enough. That's intentional — it's what makes the vault resistant to any single point of failure or theft.</p>
+
+      <h3>2. Master Password</h3>
+      <div class="kit-writebox">
+        <div class="kit-writeline"></div>
+        <div class="kit-writeline"></div>
+      </div>
+      <p class="kit-note">Write it by hand right before filing this away — don't print it digitally, and don't photograph this page.</p>
+
+      <h3>3. How to recover</h3>
+      <ol>
+        <li>Open a copy of CipherVault (cipher_vault.html) in a modern browser.</li>
+        <li>On the lock screen, choose "Import Backup" and select the encrypted backup file.</li>
+        <li>Enter the master password written above to unlock.</li>
+      </ol>
+
+      <h3>4. Notes on this vault</h3>
+      <div class="kit-writebox" style="min-height:100px;"></div>
+
+      <p class="kit-footer">Vault key derivation: Argon2id (or PBKDF2 fallback) + AES-256-GCM. This is an experimental/testing build — treat this kit as a supplement to your own backup discipline, not a guarantee.</p>
+      <button class="ghost" style="margin-top:20px;" onclick="document.getElementById('emergencyKitView').classList.add('hidden'); document.getElementById('appScreen').classList.remove('hidden');">← Back to Vault</button>
+    </div>
+  </div>
+
+<!-- ============ ITEM MODAL ============ -->
+<div id="modalOverlay" class="overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3 id="modalTitle">Add Item</h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveItemFromModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* =========================================================
+   CIPHERVAULT — client-side encrypted credential store
+   All crypto via native WebCrypto SubtleCrypto. Vault blob
+   persisted via window.storage (personal, not shared).
+   ========================================================= */
+
+/* Diceware-style wordlist (1296 common English words, sampled for distinctness — not the literal EFF list, but functionally equivalent for passphrase generation). */
+const DICEWARE_WORDS = ["abaci", "abduct", "able", "above", "abstain", "acceded", "accrued", "acid", "acrider", "acts", "adapter", "adheres", "adobe", "adult", "advises", "affirm", "afresh", "agile", "aide", "airier", "alarms", "ales", "alights", "allay", "allow", "almanac", "altars", "amazes", "ameers", "amnesia", "ample", "anaemia", "android", "angles", "annals", "anomaly", "antique", "anyway", "aplomb", "appends", "aptly", "arched", "ardor", "arid", "armpits", "arrayed", "artery", "asexual", "askew", "assails", "assort", "astuter", "atoning", "attired", "august", "autumn", "averted", "await", "away", "axed", "babbled", "backed", "badges", "bail", "baking", "balk", "ballots", "bandana", "bangs", "banners", "bard", "bark", "barrel", "bash", "basket", "batched", "batter", "bawls", "bead", "beam", "bearing", "because", "bedroom", "beeper", "befit", "behalf", "belabor", "belled", "belted", "bender", "berries", "bestial", "betting", "bible", "biggest", "billed", "binning", "birthed", "biting", "blacks", "blanker", "blazed", "bleed", "blimp", "blister", "blog", "bloom", "blown", "bluing", "blurts", "boasts", "boded", "bogs", "bolster", "bonded", "bonus", "boomed", "booted", "bore", "bossed", "bottles", "bouquet", "bowling", "boys", "brains", "brandy", "braver", "braying", "breath", "brewed", "bride", "bright", "briskly", "broiler", "brooded", "browner", "brushed", "bucked", "budges", "buffs", "bugling", "bulked", "bulls", "bumpy", "bunions", "buoys", "burial", "burnt", "burst", "bushy", "busts", "butting", "buzzers", "cabbage", "cache", "cadet", "caked", "calks", "calming", "camped", "candid", "canker", "canons", "cape", "caption", "cardiac", "caring", "carried", "cartons", "cashew", "cast", "catcall", "catsup", "caution", "cavort", "ceding", "censors", "certify", "chairs", "chances", "chapped", "charred", "chasten", "check", "cheers", "chest", "chid", "chili", "chimp", "chirp", "choking", "chords", "chromes", "chunk", "cigars", "circuit", "civil", "clamors", "clapped", "classes", "cleanly", "cleaves", "clicked", "climes", "clique", "clone", "clothe", "clove", "clue", "clvii", "coarse", "coaxed", "cockier", "codes", "cogency", "coke", "collect", "colts", "comedy", "commend", "compete", "concern", "cone", "conjure", "consuls", "convert", "cooking", "cooping", "copper", "cords", "corners", "corrals", "costed", "cougars", "couple", "courted", "coward", "coyote", "cracker", "crammed", "cranky", "crave", "crazily", "create", "crepe", "crib", "crises", "croci", "crop", "crowds", "cruel", "crumple", "cruxes", "cuddle", "culled", "cupping", "cure", "currant", "curtail", "customs", "cycle", "czars", "daggers", "damaged", "damper", "dandier", "dares", "darted", "daubed", "days", "deader", "dear", "debate", "debunk", "decency", "decode", "deduce", "deepen", "default", "defies", "defter", "deigns", "delimit", "delved", "demote", "denoted", "deny", "deposes", "derided", "desire", "destine", "detour", "devise", "dialect", "dicing", "diffuse", "dikes", "dimly", "dinghy", "dipping", "disable", "disdain", "dismiss", "distil", "ditto", "divest", "dizzied", "dodging", "doing", "dolly", "donkey", "door", "dorsal", "doubled", "dove", "dozed", "dragged", "draping", "dream", "dresser", "drilled", "drivers", "drooped", "drowned", "drummer", "dubbing", "duding", "dukes", "dummy", "dunging", "duress", "duties", "dyed", "eagerly", "earnest", "easels", "eave", "economy", "edgy", "eels", "egoism", "ekes", "elect", "elite", "eludes", "embed", "emerges", "employ", "enact", "encored", "endowed", "engage", "enjoys", "enrol", "entail", "entraps", "envying", "epoch", "equip", "ergo", "error", "essays", "ethics", "evener", "evident", "exact", "excel", "exclude", "exhaust", "exit", "expels", "export", "extoll", "exulted", "fables", "facing", "faeces", "faintly", "faking", "falsity", "fancy", "faring", "fastens", "fathoms", "faucets", "fawns", "feather", "feel", "felines", "felting", "ferment", "festive", "feud", "fibber", "fiddles", "fiesta", "figures", "fillet", "filth", "fined", "firearm", "firms", "fishy", "fives", "fizzy", "flakier", "flare", "flatted", "fleck", "fleeter", "flicks", "flint", "floats", "flop", "flounce", "flows", "flunk", "flutes", "foaled", "fodder", "fogy", "folders", "fonder", "fools", "forbade", "fords", "forfeit", "forgone", "former", "forty", "fouling", "fowl", "fragile", "franks", "freed", "frenzy", "fries", "frisked", "fronds", "frowned", "fuel", "fulling", "funding", "furious", "furrows", "fusses", "fuzzier", "gagging", "galas", "gallops", "games", "gaped", "garbles", "garret", "gasping", "gaudier", "gawkier", "gazing", "gelt", "genie", "gentry", "geyser", "gibber", "giggle", "ginger", "girls", "gladder", "glared", "glean", "glides", "globes", "gloves", "gluing", "gnats", "goalie", "goblets", "going", "gong", "goofed", "gopher", "gosh", "gourmet", "graced", "gram", "granule", "grassy", "graven", "graze", "green", "greyest", "grilles", "grinder", "grit", "groom", "grosses", "grouses", "grows", "grumble", "guffaw", "guises", "gulls", "gunmen", "gush", "gutted", "gymnast", "hacksaw", "hairdo", "haling", "halting", "hamper", "handout", "hapless", "hardier", "harlot", "harps", "hashes", "hasty", "hatting", "havoc", "hazels", "headway", "hear", "heated", "heavier", "heed", "heinous", "help", "herald", "hermits", "herpes", "hiccups", "highs", "hilt", "hinted", "hiring", "hives", "hobble", "hocks", "holds", "hollows", "homier", "honied", "hoof", "hoorahs", "hopped", "hornier", "hosiery", "hotel", "houses", "hubbub", "huffy", "hulls", "hummed", "hung", "hurdled", "hurtful", "huskies", "hyaenas", "iced", "ideas", "idly", "iguanas", "imbeds", "imparts", "impish", "improve", "inch", "incur", "indorse", "infants", "inflate", "inhaled", "inkier", "innards", "insect", "inspire", "insults", "intents", "invalid", "invokes", "iron", "issued", "itemize", "jackals", "jagged", "jammed", "jaunty", "jeans", "jerkier", "jetties", "jigged", "jingle", "jocular", "joke", "jolts", "joys", "jugular", "jumper", "junket", "juster", "kayaks", "keeper", "keyed", "kidding", "kilned", "kindled", "kinky", "kits", "knee", "knight", "knot", "kowtow", "lacier", "lades", "lagoon", "lambs", "lances", "lapel", "lards", "laser", "latched", "lathers", "launch", "lawyers", "lazier", "leaf", "leaks", "learned", "leaved", "leer", "legals", "leisure", "lent", "lessens", "levee", "lewd", "liberty", "lieu", "like", "lilted", "limited", "liners", "linking", "lisp", "lithe", "liven", "load", "loaning", "lobs", "lockers", "lofted", "loiter", "longish", "loonie", "looser", "lopping", "loss", "lounge", "loving", "loyalty", "lull", "lunar", "lupines", "lush", "luxury", "lyrical", "madcaps", "magic", "mailbox", "maize", "malaria", "malts", "mandate", "manhole", "mannish", "manures", "marcher", "marked", "marrow", "martyrs", "mason", "matador", "matt", "mauled", "maze", "means", "media", "meeting", "members", "mends", "mercies", "merited", "messier", "method", "microbe", "mighty", "mile", "milled", "minced", "mines", "minor", "minutes", "misers", "missed", "mistype", "mixing", "mock", "modesty", "moldier", "molting", "monkey", "mooed", "mooting", "morass", "mortal", "mostly", "motley", "mounts", "mousy", "mower", "muddier", "muffles", "mull", "munched", "muse", "musk", "mustier", "mutest", "myriads", "nailing", "napalm", "nasal", "naught", "nearer", "necking", "negated", "nerves", "netting", "newbies", "nibbles", "nicks", "ninety", "nitrate", "nodes", "nominee", "north", "notches", "nougats", "nozzle", "nudging", "numbs", "nutted", "oasis", "obliged", "obtuse", "octopus", "offend", "offs", "oiliest", "olives", "ones", "oodles", "openers", "opposes", "opulent", "orbital", "ores", "orphan", "ousted", "outer", "outlets", "outsets", "overate", "overt", "oxen", "pack", "paddle", "pages", "painter", "pales", "pals", "panels", "panther", "papered", "parcels", "park", "parring", "parsons", "pass", "pastels", "patches", "patriot", "paunch", "pawn", "payoffs", "pealing", "pebbled", "peddled", "peep", "pegging", "penance", "pennant", "peoples", "peril", "permit", "peruse", "petered", "pewters", "phoney", "phrased", "pickier", "piddled", "pigeons", "piled", "pills", "pining", "pioneer", "pirates", "pitied", "pixy", "plaid", "plank", "plaster", "playing", "pleated", "plights", "plowed", "plumb", "plums", "plywood", "poems", "poisons", "poled", "polkaed", "poncho", "pooling", "popped", "port", "ports", "poster", "pots", "pounded", "powdery", "prank", "precise", "prelude", "presto", "preys", "pried", "priming", "prism", "probed", "profane", "promise", "propels", "protons", "prowess", "prunes", "pucker", "puffer", "pulls", "pumice", "pundits", "punter", "pure", "purpler", "pursued", "pussies", "puzzled", "quaint", "quarter", "queenly", "quest", "quieted", "quirk", "quorum", "rabbles", "racists", "radials", "raffles", "ragtime", "rained", "raking", "ramps", "ranger", "ransom", "raping", "rarest", "raster", "ratted", "raveled", "rays", "read", "realest", "reap", "rebates", "rebuked", "receive", "recoil", "rectum", "redo", "reefed", "refers", "refuels", "regains", "region", "reins", "relaxes", "relieve", "remark", "remotes", "reneged", "reopens", "repents", "reprint", "rescind", "resign", "rest", "retails", "retires", "reuse", "revenue", "revise", "revolve", "rhubarb", "richer", "rider", "rifled", "rigid", "ring", "rioter", "ripple", "risks", "riveted", "roast", "robot", "rode", "rolled", "roofs", "roosted", "rose", "rotor", "rougher", "routed", "royal", "rubs", "ruff", "ruing", "rummage", "rundown", "runway", "rustier", "sabres", "sades", "safety", "sailing", "salary", "salt", "salves", "sanding", "saps", "satin", "saunas", "savior", "sawing", "scale", "scanned", "scares", "scenes", "scissor", "scoots", "scorns", "scrams", "screens", "scruff", "scythed", "sear", "seaweed", "sector", "seduce", "seemed", "seethe", "sell", "sends", "sentry", "serpent", "sets", "severe", "sexing", "shadow", "shaking", "shanty", "sharped", "shawls", "sheen", "shell", "shields", "shinned", "shiver", "shoes", "shore", "shots", "showers", "shriek", "shrubs", "shunted", "sickens", "sidle", "sift", "signals", "sillier", "simile", "sinewy", "sink", "sips", "sissy", "sixth", "skated", "skewers", "skim", "skips", "skunks", "slain", "slapped", "slaves", "sleeks", "slew", "slides", "slimy", "sliver", "sloping", "slowed", "slum", "slut", "smartly", "smelted", "smite", "smokes", "smuggle", "snake", "snarls", "snide", "snipes", "snoozed", "snow", "snuffs", "soaping", "soccer", "sodding", "soggy", "sole", "soloing", "somehow", "soothe", "sores", "sound", "soured", "spacing", "spar", "spars", "spawned", "specify", "spelled", "spheres", "spike", "spines", "spits", "splurge", "spoofed", "spores", "sprain", "spriest", "sprung", "spurt", "squares", "squids", "stabled", "staged", "stakes", "stalls", "stanzas", "starker", "stately", "staved", "steamed", "stellar", "sterner", "stiffen", "stimuli", "stitch", "stoles", "stool", "storey", "stove", "straps", "streets", "strikes", "strode", "stub", "study", "stuns", "styling", "sublime", "suburbs", "sucking", "suffix", "suitors", "sultans", "sundaes", "sunset", "support", "surgeon", "suspect", "swan", "swatted", "sweet", "swifter", "swines", "switch", "swum", "syrup", "tabloid", "tacking", "tagged", "takeoff", "talking", "tamer", "tango", "tanning", "tardy", "tart", "taste", "taunted", "taxicab", "teaks", "teased", "teenage", "tellers", "tenable", "tenets", "tent", "termed", "terser", "text", "thawing", "then", "theta", "thin", "thirsty", "thrash", "thrills", "through", "thumbs", "ticket", "tidied", "tiffing", "till", "timer", "tingle", "tinny", "tipsier", "tissues", "toaster", "toffies", "tokens", "tomcats", "tonight", "toot", "toppled", "torsi", "toted", "touched", "tousle", "towered", "traced", "trading", "traitor", "trash", "trays", "treeing", "trestle", "tried", "trinity", "trips", "troop", "trouped", "trucks", "truly", "truths", "tuck", "tumble", "tundras", "turbine", "turning", "tussles", "tweed", "twine", "twisted", "typhoid", "udders", "unblock", "undoes", "unfits", "uniform", "unity", "unman", "unrest", "unsung", "unusual", "update", "uplifts", "upshot", "urbane", "usage", "usually", "utters", "vaginal", "validly", "valving", "variant", "vastly", "veers", "vend", "venting", "verges", "verve", "vets", "vice", "view", "villa", "violet", "viruses", "visit", "vivider", "voided", "vomits", "vowed", "waddle", "wafted", "wagons", "waiting", "waking", "wallop", "wands", "warble", "warm", "warpath", "wary", "wasting", "wavered", "waylay", "weaned", "weasel", "wedding", "week", "weight", "welds", "were", "whalers", "wheeze", "whetted", "whine", "whirrs", "whitens", "whom", "wicks", "widths", "wildcat", "wills", "wind", "winging", "wintery", "wiry", "wispier", "witness", "wobbles", "wombat", "woody", "wooly", "workman", "worries", "wounded", "wrath", "wrens", "wrist", "wronged", "xcvii", "yakked", "yarns", "yelled", "yeti", "yoke", "youth", "zealous", "zigzags", "zombi"];
+const STORAGE_KEY = 'ciphervault_blob_v1';
+const SETTINGS_KEY = 'ciphervault_settings_v1';
+const BIOMETRIC_KEY = 'ciphervault_biometric_v1';
+let masterKey = null;      // CryptoKey, memory-only
+let vault = null;          // decrypted { items: [...] }
+let currentView = 'all';
+let currentFolder = null;
+let activeTagFilter = null;
+let editingId = null;
+function filterByTag(tag){
+  currentView = 'tagfilter';
+  activeTagFilter = tag;
+  currentFolder = null;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('viewTitle').textContent = 'TAG: ' + tag.toUpperCase();
+  document.getElementById('itemsView').classList.remove('hidden');
+  document.getElementById('securityView').classList.add('hidden');
+  document.getElementById('settingsView').classList.add('hidden');
+  renderFolderNav();
+  renderItems();
+}
+let autoLockTimer = null;
+let settings = { autoLock: 300000, clipClear: true, clipClearSecs: 20, lockOnBlur: true };
+
+/* ---------------- utility ---------------- */
+function toast(msg, isErr){
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' err' : '');
+  el.textContent = msg;
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(()=>el.remove(), 3200);
+}
+function uid(){ return 'i_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+function b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function unb64(str){ return Uint8Array.from(atob(str), c=>c.charCodeAt(0)); }
+function esc(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------------- memory zeroization (best-effort — see note in Settings) ---------------- */
+function zeroizeBuffer(buffer){
+  if(buffer && buffer instanceof Uint8Array){
+    crypto.getRandomValues(buffer); // overwrite with noise first
+    buffer.fill(0);                  // then zero
+  }
+}
+
+/* ---------------- crypto: KDF (PBKDF2 v1 / Argon2id v2) + AES-GCM ---------------- */
+const ARGON2_CDN = 'https://cdn.jsdelivr.net/npm/argon2-browser@1.18.0/dist/argon2-bundled.min.js';
+const ARGON2_PARAMS = { mem: 65536, time: 3, parallelism: 4, hashLen: 32 }; // OWASP baseline
+let argon2LoadPromise = null;
+function loadArgon2Lib(){
+  if(window.argon2) return Promise.resolve(true);
+  if(argon2LoadPromise) return argon2LoadPromise;
+  argon2LoadPromise = new Promise((resolve)=>{
+    const s = document.createElement('script');
+    s.src = ARGON2_CDN;
+    s.onload = ()=> resolve(!!window.argon2);
+    s.onerror = ()=> resolve(false);
+    document.head.appendChild(s);
+    setTimeout(()=> resolve(!!window.argon2), 4000); // don't hang forever if offline
+  });
+  return argon2LoadPromise;
+}
+async function deriveKeyPBKDF2(password, salt, iterations){
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations, hash:'SHA-256' },
+    baseKey,
+    { name:'AES-GCM', length:256 },
+    false,
+    ['encrypt','decrypt']
+  );
+}
+async function deriveKeyArgon2id(password, salt){
+  const result = await window.argon2.hash({
+    pass: password,
+    salt,
+    type: window.argon2.ArgonType.Argon2id,
+    mem: ARGON2_PARAMS.mem,
+    time: ARGON2_PARAMS.time,
+    parallelism: ARGON2_PARAMS.parallelism,
+    hashLen: ARGON2_PARAMS.hashLen
+  });
+  const hashBytes = result.hash instanceof Uint8Array ? result.hash : new Uint8Array(result.hash);
+  const key = await crypto.subtle.importKey('raw', hashBytes, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+  zeroizeBuffer(hashBytes); // importKey copies the bytes in; we don't need our copy anymore
+  return key;
+}
+// Picks the strongest available KDF for a *new* derivation (vault creation / password change).
+async function deriveKeyBest(password, salt){
+  const ok = await loadArgon2Lib();
+  if(ok){
+    return { key: await deriveKeyArgon2id(password, salt), kdfVersion: 2, iterations: null, argon2: ARGON2_PARAMS };
+  }
+  toast('Argon2id module unavailable (offline?) — using strengthened PBKDF2 instead.', true);
+  return { key: await deriveKeyPBKDF2(password, salt, 600000), kdfVersion: 1, iterations: 600000, argon2: null };
+}
+// Derives against an *existing* blob, respecting whatever KDF it was created with.
+async function deriveKeyForBlob(password, blob){
+  const salt = unb64(blob.salt);
+  if(blob.kdfVersion === 2){
+    const ok = await loadArgon2Lib();
+    if(!ok) throw new Error('argon2-unavailable');
+    return deriveKeyArgon2id(password, salt);
+  }
+  return deriveKeyPBKDF2(password, salt, blob.iterations || 200000);
+}
+async function encryptJSON(key, obj){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder().encode(JSON.stringify(obj));
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, enc);
+  return { iv: b64(iv), ct: b64(ct) };
+}
+async function decryptJSON(key, payload){
+  const iv = unb64(payload.iv);
+  const ct = unb64(payload.ct);
+  const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function sha1Hex(str){
+  const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+
+/* ---------------- storage (persistent, per-user) ---------------- */
+async function storageGet(key){
+  try{ const r = await window.storage.get(key, false); return r ? r.value : null; }
+  catch(e){ return null; }
+}
+async function storageSet(key, value){
+  try{ return await window.storage.set(key, value, false); }
+  catch(e){ toast('Storage write failed: '+e.message, true); return null; }
+}
+async function storageDelete(key){
+  try{ return await window.storage.delete(key, false); } catch(e){ return null; }
+}
+
+/* ---------------- boot ---------------- */
+window.addEventListener('DOMContentLoaded', boot);
+async function boot(){
+  const s = await storageGet(SETTINGS_KEY);
+  if(s){ try{ settings = Object.assign({}, settings, JSON.parse(s)); }catch(e){} }
+  document.getElementById('autoLockSelect').value = String(settings.autoLock);
+  document.getElementById('clipClearChk').checked = settings.clipClear;
+  document.getElementById('clipClearSecs').value = settings.clipClearSecs;
+  const lockOnBlurChk = document.getElementById('lockOnBlurChk');
+  if(lockOnBlurChk) lockOnBlurChk.checked = settings.lockOnBlur;
+
+  await cleanupTrash();
+  const raw = await storageGet(STORAGE_KEY);
+  document.getElementById('authScreen').classList.remove('hidden');
+  if(raw){
+    document.getElementById('unlockCard').classList.remove('hidden');
+    initBiometricStatus();
+  } else {
+    document.getElementById('setupCard').classList.remove('hidden');
+  }
+}
+
+/* ---------------- strength meter (zxcvbn if loaded, else local heuristic) ---------------- */
+function estimateStrengthFallback(pw){
+  if(!pw) return {score:0,label:'',color:'#333'};
+  let classes = 0;
+  if(/[a-z]/.test(pw)) classes++;
+  if(/[A-Z]/.test(pw)) classes++;
+  if(/[0-9]/.test(pw)) classes++;
+  if(/[^A-Za-z0-9]/.test(pw)) classes++;
+  const entropyBits = pw.length * Math.log2(Math.max(classes*20, 10));
+  let score, label, color;
+  if(pw.length < 8 || entropyBits < 35){ score=1; label='WEAK'; color='var(--red)'; }
+  else if(entropyBits < 60){ score=2; label='FAIR'; color='var(--yellow)'; }
+  else if(entropyBits < 90){ score=3; label='STRONG'; color='var(--cyan)'; }
+  else { score=4; label='VERY STRONG'; color='var(--green)'; }
+  return {score,label,color,pct: Math.min(100, (score/4)*100), crackTime:null};
+}
+function estimateStrength(pw){
+  if(!pw) return {score:0,label:'',color:'#333'};
+  if(typeof zxcvbn === 'function'){
+    try{
+      const z = zxcvbn(pw);
+      const labels = ['VERY WEAK','WEAK','FAIR','STRONG','VERY STRONG'];
+      const colors = ['var(--red)','var(--red)','var(--yellow)','var(--cyan)','var(--green)'];
+      return {
+        score: z.score, label: labels[z.score], color: colors[z.score],
+        pct: Math.min(100, (z.score/4)*100),
+        crackTime: z.crack_times_display ? z.crack_times_display.offline_slow_hashing_1e4_per_second : null
+      };
+    }catch(e){ /* fall through to heuristic */ }
+  }
+  return estimateStrengthFallback(pw);
+}
+function updateStrength(inputId, fillId, labelId){
+  inputId = inputId || 'setupPw'; fillId = fillId || 'strengthFill'; labelId = labelId || 'strengthLabel';
+  const pw = document.getElementById(inputId).value;
+  const r = estimateStrength(pw);
+  const fill = document.getElementById(fillId), lbl = document.getElementById(labelId);
+  fill.style.width = r.pct + '%';
+  fill.style.background = r.color;
+  lbl.textContent = pw ? (r.label + (r.crackTime ? ' · crack time ~' + r.crackTime : '')) : '\u00A0';
+  lbl.style.color = r.color;
+}
+
+/* ---------------- setup / unlock / lock ---------------- */
+async function createVault(){
+  const pw = document.getElementById('setupPw').value;
+  const pw2 = document.getElementById('setupPw2').value;
+  const err = document.getElementById('setupErr');
+  err.textContent = '';
+  if(pw.length < 8){ err.textContent = 'Master password must be at least 8 characters.'; return; }
+  if(pw !== pw2){ err.textContent = 'Passwords do not match.'; return; }
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const btn = document.querySelector('#setupCard button.primary');
+  if(btn){ btn.disabled = true; btn.textContent = 'Deriving key…'; }
+  const { key, kdfVersion, iterations, argon2 } = await deriveKeyBest(pw, salt);
+  if(btn){ btn.disabled = false; btn.textContent = 'Create Vault →'; }
+  masterKey = key;
+  vault = { items: [] };
+  const payload = await encryptJSON(masterKey, vault);
+  const blob = { v:1, kdfVersion, salt: b64(salt), iterations, argon2, iv: payload.iv, ct: payload.ct };
+  await storageSet(STORAGE_KEY, JSON.stringify(blob));
+  document.getElementById('setupPw').value = ''; document.getElementById('setupPw2').value = '';
+  toast('Vault created with ' + (kdfVersion===2 ? 'Argon2id' : 'PBKDF2') + ' key derivation.');
+  enterApp();
+}
+async function unlockVault(){
+  const pw = document.getElementById('unlockPw').value;
+  const err = document.getElementById('unlockErr');
+  err.textContent = '';
+  const btn = document.querySelector('#unlockCard button.primary');
+  if(btn){ btn.disabled = true; btn.textContent = 'Deriving key…'; }
+  const result = await unlockWithPassword(pw);
+  if(btn){ btn.disabled = false; btn.textContent = 'Unlock →'; }
+  if(result.ok){
+    document.getElementById('unlockPw').value = '';
+    toast('Vault unlocked.');
+  } else {
+    err.textContent = result.err;
+  }
+}
+// Core unlock routine shared by the password field and biometric unlock.
+async function unlockWithPassword(pw){
+  const raw = await storageGet(STORAGE_KEY);
+  if(!raw) return { ok:false, err:'No vault found.' };
+  let blob;
+  try{ blob = JSON.parse(raw); } catch(e){ return { ok:false, err:'Vault data corrupted.' }; }
+  try{
+    const key = await deriveKeyForBlob(pw, blob);
+    const decrypted = await decryptJSON(key, { iv: blob.iv, ct: blob.ct });
+    masterKey = key;
+    vault = decrypted;
+    enterApp();
+    if((blob.kdfVersion||1) < 2){
+      upgradeKdfInBackground(pw, blob); // best-effort, non-blocking
+    }
+    return { ok:true };
+  } catch(e){
+    if(e && e.message === 'argon2-unavailable'){
+      return { ok:false, err:'This vault uses Argon2id and the module could not load (are you offline?). Connect once and retry.' };
+    }
+    return { ok:false, err:'Incorrect password, or vault data is corrupted.' };
+  }
+}
+async function upgradeKdfInBackground(pw, oldBlob){
+  try{
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const { key, kdfVersion, iterations, argon2 } = await deriveKeyBest(pw, salt);
+    if(kdfVersion !== 2) return; // argon2 still unavailable, try again next unlock
+    masterKey = key;
+    const payload = await encryptJSON(masterKey, vault);
+    const blob = { v:1, kdfVersion, salt: b64(salt), iterations, argon2, iv: payload.iv, ct: payload.ct };
+    await storageSet(STORAGE_KEY, JSON.stringify(blob));
+    toast('Vault silently upgraded to Argon2id key derivation.');
+  } catch(e){ /* non-fatal — just stays on PBKDF2 until it can upgrade */ }
+}
+function lockVault(){
+  masterKey = null;
+  vault = null;
+  clearTimeout(autoLockTimer);
+  document.getElementById('appScreen').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('setupCard').classList.add('hidden');
+  document.getElementById('unlockCard').classList.remove('hidden');
+  document.getElementById('lockBtn').classList.add('hidden');
+  document.getElementById('statusPill').textContent = '● LOCKED';
+  document.getElementById('statusPill').className = 'status-pill locked';
+  renderBiometricButton();
+}
+/* ---------------- biometric quick-unlock (WebAuthn PRF extension) ----------------
+   Corrects a common misconception: WebAuthn does not hand a website raw access to
+   the device's TPM/Secure Enclave. What it *can* do (on browsers/authenticators that
+   support the "prf" extension) is deterministically derive a symmetric secret tied to
+   a specific credential + salt. We use that secret to wrap the master password, not
+   the derived vault key itself — simpler, and doesn't require an extractable AES key.
+   Support is currently narrower than password unlock: recent Chrome/Edge + a platform
+   authenticator or compatible security key. Password unlock always remains available. */
+function bufToB64Url(buf){ return b64(buf).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64UrlToBuf(str){
+  str = str.replace(/-/g,'+').replace(/_/g,'/');
+  while(str.length % 4) str += '=';
+  return unb64(str);
+}
+function webauthnSupported(){
+  return !!(window.PublicKeyCredential && navigator.credentials);
+}
+async function setupBiometric(){
+  const statusEl = document.getElementById('biometricStatus');
+  if(!webauthnSupported()){ toast('WebAuthn is not available in this browser.', true); return; }
+  const pw = prompt('Re-enter your master password to link it to biometric unlock:');
+  if(!pw) return;
+  // verify the password is actually correct before wiring anything up
+  const raw = await storageGet(STORAGE_KEY);
+  const blob = JSON.parse(raw);
+  try{ await decryptJSON(await deriveKeyForBlob(pw, blob), { iv: blob.iv, ct: blob.ct }); }
+  catch(e){ toast('That password is incorrect — biometric unlock not enabled.', true); return; }
+
+  try{
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = crypto.getRandomValues(new Uint8Array(16));
+    const prfSalt = crypto.getRandomValues(new Uint8Array(32));
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'CipherVault' },
+        user: { id: userId, name: 'ciphervault-user', displayName: 'CipherVault Vault' },
+        pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
+        authenticatorSelection: { userVerification: 'required', residentKey: 'preferred' },
+        extensions: { prf: {} },
+        timeout: 60000
+      }
+    });
+    if(!cred){ toast('Biometric setup cancelled.', true); return; }
+    const prfEnabled = cred.getClientExtensionResults && cred.getClientExtensionResults().prf && cred.getClientExtensionResults().prf.enabled;
+    if(!prfEnabled){
+      toast('This device/browser does not support the PRF extension needed for biometric unlock.', true);
+      return;
+    }
+    // Immediately do a get() to actually pull the derived secret (create() only confirms support).
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ id: cred.rawId, type:'public-key' }],
+        userVerification: 'required',
+        extensions: { prf: { eval: { first: prfSalt } } },
+        timeout: 60000
+      }
+    });
+    const prfResults = assertion.getClientExtensionResults().prf;
+    if(!prfResults || !prfResults.results || !prfResults.results.first){
+      toast('Could not retrieve a PRF secret from the authenticator.', true); return;
+    }
+    const secretBytes = new Uint8Array(prfResults.results.first).slice(0, 32);
+    const wrapKey = await crypto.subtle.importKey('raw', secretBytes, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+    zeroizeBuffer(secretBytes);
+    const wrapped = await encryptJSON(wrapKey, { pw });
+    const record = { credId: bufToB64Url(cred.rawId), prfSalt: b64(prfSalt), iv: wrapped.iv, ct: wrapped.ct };
+    await storageSet(BIOMETRIC_KEY, JSON.stringify(record));
+    toast('Biometric unlock enabled.');
+    initBiometricStatus();
+  } catch(e){
+    toast('Biometric setup failed: ' + (e.message || 'unknown error'), true);
+  }
+}
+async function disableBiometric(){
+  await storageDelete(BIOMETRIC_KEY);
+  toast('Biometric unlock disabled.');
+  initBiometricStatus();
+  renderBiometricButton();
+}
+async function tryBiometricUnlock(){
+  const raw = await storageGet(BIOMETRIC_KEY);
+  if(!raw){ toast('Biometric unlock is not set up.', true); return; }
+  const record = JSON.parse(raw);
+  try{
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ id: b64UrlToBuf(record.credId), type:'public-key' }],
+        userVerification: 'required',
+        extensions: { prf: { eval: { first: unb64(record.prfSalt) } } },
+        timeout: 60000
+      }
+    });
+    const prfResults = assertion.getClientExtensionResults().prf;
+    if(!prfResults || !prfResults.results || !prfResults.results.first) throw new Error('no-prf-result');
+    const secretBytes = new Uint8Array(prfResults.results.first).slice(0, 32);
+    const wrapKey = await crypto.subtle.importKey('raw', secretBytes, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+    zeroizeBuffer(secretBytes);
+    const { pw } = await decryptJSON(wrapKey, { iv: record.iv, ct: record.ct });
+    const result = await unlockWithPassword(pw);
+    if(result.ok) toast('Unlocked with biometrics.');
+    else document.getElementById('unlockErr').textContent = result.err;
+  } catch(e){
+    document.getElementById('unlockErr').textContent = 'Biometric unlock failed or was cancelled.';
+  }
+}
+async function initBiometricStatus(){
+  const el = document.getElementById('biometricStatus');
+  if(!el) return;
+  if(!webauthnSupported()){ el.textContent = 'Not supported in this browser.'; return; }
+  const raw = await storageGet(BIOMETRIC_KEY);
+  el.textContent = raw ? 'Enabled on this device.' : 'Not set up.';
+  const enableBtn = document.getElementById('biometricEnableBtn');
+  const disableBtn = document.getElementById('biometricDisableBtn');
+  if(enableBtn) enableBtn.classList.toggle('hidden', !!raw);
+  if(disableBtn) disableBtn.classList.toggle('hidden', !raw);
+  renderBiometricButton();
+}
+async function renderBiometricButton(){
+  const wrap = document.getElementById('bioUnlockWrap');
+  if(!wrap) return;
+  if(!webauthnSupported()){ wrap.innerHTML = ''; return; }
+  const raw = await storageGet(BIOMETRIC_KEY);
+  wrap.innerHTML = raw ? '<button style="width:100%;margin-top:10px;" onclick="tryBiometricUnlock()">🔐 Unlock with Biometrics / Passkey</button>' : '';
+}
+
+function enterApp(){
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appScreen').classList.remove('hidden');
+  document.getElementById('lockBtn').classList.remove('hidden');
+  document.getElementById('statusPill').textContent = '● UNLOCKED';
+  document.getElementById('statusPill').className = 'status-pill unlocked';
+  resetAutoLock();
+  renderAll();
+}
+function resetAutoLock(){
+  clearTimeout(autoLockTimer);
+  if(settings.autoLock > 0){
+    autoLockTimer = setTimeout(()=>{ lockVault(); toast('Vault auto-locked due to inactivity.'); }, settings.autoLock);
+  }
+}
+['click','keydown','mousemove'].forEach(ev=>{
+  document.addEventListener(ev, ()=>{ if(masterKey) resetAutoLock(); }, {passive:true});
+});
+// Phase 3: lock immediately on tab hide / focus loss / page teardown — toggleable, since it's aggressive.
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden && masterKey && settings.lockOnBlur) lockVault(); });
+window.addEventListener('blur', ()=>{ if(masterKey && settings.lockOnBlur) lockVault(); });
+window.addEventListener('pagehide', ()=>{ if(masterKey) lockVault(); });
+
+async function saveVaultToDisk(){
+  if(!masterKey) return;
+  const raw = await storageGet(STORAGE_KEY);
+  const blob = raw ? JSON.parse(raw) : { v:1, kdfVersion:1, iterations:200000 };
+  const payload = await encryptJSON(masterKey, vault);
+  blob.iv = payload.iv; blob.ct = payload.ct;
+  await storageSet(STORAGE_KEY, JSON.stringify(blob));
+}
+
+/* ---------------- panic wipe / backup ---------------- */
+async function confirmPanicWipe(){
+  if(!confirm('PANIC WIPE: This permanently deletes the vault from this device. This cannot be undone unless you have an exported backup. Continue?')) return;
+  if(!confirm('Are you absolutely sure? Type OK in the next prompt to confirm.')) return;
+  await storageDelete(STORAGE_KEY);
+  masterKey = null; vault = null;
+  toast('Vault wiped.');
+  location.reload();
+}
+async function exportBackup(){
+  const raw = await storageGet(STORAGE_KEY);
+  if(!raw){ toast('No vault to export.', true); return; }
+  const a = document.createElement('a');
+  a.href = 'data:application/json,' + encodeURIComponent(raw);
+  a.download = 'ciphervault_backup_' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  toast('Encrypted backup downloaded.');
+}
+function triggerImport(){ document.getElementById('importFile').click(); }
+async function importBackup(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const text = await file.text();
+  try{
+    const parsed = JSON.parse(text);
+    if(!parsed.salt || !parsed.ct){ throw new Error('bad format'); }
+    if(await storageGet(STORAGE_KEY)){
+      if(!confirm('This will overwrite the existing vault on this device. Continue?')) return;
+    }
+    await storageSet(STORAGE_KEY, JSON.stringify(parsed));
+    toast('Backup imported. Unlock with that vault\'s master password.');
+    document.getElementById('unlockCard').classList.remove('hidden');
+    document.getElementById('setupCard').classList.add('hidden');
+  } catch(e){
+    toast('Invalid backup file.', true);
+  }
+}
+
+/* ---------------- CSV transfer (plaintext, for other password managers) ---------------- */
+function csvEscape(val){
+  val = (val===undefined||val===null) ? '' : String(val);
+  if(/[",\n]/.test(val)) return '"' + val.replace(/"/g,'""') + '"';
+  return val;
+}
+function exportCSV(){
+  const logins = vault.items.filter(i=>i.type==='login' && !i.isDeleted);
+  if(logins.length===0){ toast('No login items to export.', true); return; }
+  const header = ['name','url','username','password','notes'];
+  const rows = [header.join(',')];
+  logins.forEach(it=>{
+    rows.push([csvEscape(it.title), csvEscape(it.url), csvEscape(it.username), csvEscape(it.password), csvEscape(it.notes)].join(','));
+  });
+  const csv = rows.join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'ciphervault_logins_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  toast(`Exported ${logins.length} login(s) as plaintext CSV — delete the file once you've imported it elsewhere.`);
+}
+function triggerImportCsv(){ document.getElementById('importCsvFile').click(); }
+function parseCSV(text){
+  // Minimal RFC4180-ish parser: handles quoted fields, escaped quotes, commas/newlines inside quotes.
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i], next = text[i+1];
+    if(inQuotes){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else { field += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\r'){ /* skip */ }
+      else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => !(r.length===1 && r[0]===''));
+}
+// Known export formats. Detection is by header signature; falls back to generic alias matching
+// for anything else (KeePass CSV, custom exports, etc.).
+const CSV_PRESETS = [
+  { name: 'Bitwarden', signature: ['folder','favorite','type','name','notes','login_uri','login_username','login_password'],
+    map: { title:'name', url:'login_uri', username:'login_username', password:'login_password', notes:'notes', totp:'login_totp', folder:'folder' } },
+  { name: '1Password', signature: ['title','url','username','password'],
+    map: { title:'title', url:'url', username:'username', password:'password', notes:'notes', totp:'otp' } },
+  { name: 'Chrome/Firefox', signature: ['name','url','username','password'],
+    map: { title:'name', url:'url', username:'username', password:'password', notes:'note' } }
+];
+const CSV_ALIASES = {
+  title: ['name','title','item name','account name'],
+  url: ['url','login_uri','website','site','uri'],
+  username: ['username','login_username','email','user name'],
+  password: ['password','login_password'],
+  notes: ['notes','extra','note'],
+  totp: ['login_totp','otp','totp','2fa secret'],
+  folder: ['folder','group']
+};
+function detectCsvPreset(headerRow){
+  const lower = headerRow.map(h=>h.trim().toLowerCase());
+  for(const preset of CSV_PRESETS){
+    if(preset.signature.every(sig => lower.includes(sig))) return preset;
+  }
+  return null;
+}
+function mapCsvHeader(headerRow){
+  const lower = headerRow.map(h=>h.trim().toLowerCase());
+  const preset = detectCsvPreset(headerRow);
+  const map = {};
+  const source = preset ? preset.map : null;
+  Object.keys(CSV_ALIASES).forEach(field=>{
+    let headerName = source ? source[field] : null;
+    let idx = headerName ? lower.indexOf(headerName) : -1;
+    if(idx === -1) idx = lower.findIndex(h => CSV_ALIASES[field].includes(h));
+    if(idx !== -1) map[field] = idx;
+  });
+  return { map, presetName: preset ? preset.name : 'Generic' };
+}
+function showCsvDeleteReminder(count, presetName){
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:440px;">
+    <h3 style="color:var(--red);">⚠ Delete the CSV Now</h3>
+    <div class="note-box warn2" style="margin-top:12px;">
+      Imported ${count} item(s) from a detected <b>${esc(presetName)}</b> export. That file still sits on your disk <b>in plaintext</b> — every password readable by anything with file access.
+      <br><br>
+      Go delete it from your downloads folder (or wherever it landed) right now, and empty your trash/recycle bin too if your OS keeps a copy there.
+    </div>
+    <div class="modal-actions"><button class="primary" onclick="this.closest('.overlay').remove()">Got it</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+async function importCsv(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const text = await file.text();
+  const rows = parseCSV(text);
+  if(rows.length < 2){ toast('CSV appears empty.', true); evt.target.value=''; return; }
+  const { map, presetName } = mapCsvHeader(rows[0]);
+  if(map.password === undefined){ toast('Could not find a password column in that CSV.', true); evt.target.value=''; return; }
+  const dataRows = rows.slice(1).filter(r => r.some(c=>c && c.trim()));
+  if(!confirm(`Detected format: ${presetName}. Found ${dataRows.length} row(s). Import as new login items?`)){ evt.target.value=''; return; }
+  let imported = 0, totpImported = 0;
+  dataRows.forEach(r=>{
+    const password = map.password!==undefined ? (r[map.password]||'').trim() : '';
+    if(!password) return;
+    const title = (map.title!==undefined ? r[map.title] : '') || 'Imported Login';
+    vault.items.push({
+      id: uid(),
+      type: 'login',
+      title,
+      url: map.url!==undefined ? (r[map.url]||'').trim() : '',
+      username: map.username!==undefined ? (r[map.username]||'').trim() : '',
+      password,
+      notes: map.notes!==undefined ? (r[map.notes]||'').trim() : '',
+      tags: ['imported'],
+      folder: map.folder!==undefined ? (r[map.folder]||'').trim() : '',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    imported++;
+    const totpSecret = map.totp!==undefined ? (r[map.totp]||'').trim().replace(/\s/g,'') : '';
+    if(totpSecret){
+      vault.items.push({
+        id: uid(), type: 'totp', title: title + ' (2FA)', issuer: title, account: map.username!==undefined ? r[map.username] : '',
+        secret: totpSecret, tags: ['imported'], folder: map.folder!==undefined ? (r[map.folder]||'').trim() : '',
+        createdAt: Date.now(), updatedAt: Date.now()
+      });
+      totpImported++;
+    }
+  });
+  await saveVaultToDisk();
+  updateCounts(); renderFolderNav(); renderItems();
+  toast(`Imported ${imported} login(s)${totpImported ? ' + ' + totpImported + ' 2FA secret(s)' : ''}, tagged #imported.`);
+  showCsvDeleteReminder(imported, presetName);
+  evt.target.value = '';
+}
+async function changeMasterPassword(){
+  const cur = document.getElementById('curMpw').value;
+  const next = document.getElementById('newMpw').value;
+  const err = document.getElementById('changePwErr');
+  err.textContent = '';
+  if(next.length < 8){ err.textContent = 'New password must be at least 8 characters.'; return; }
+  const raw = await storageGet(STORAGE_KEY);
+  const blob = JSON.parse(raw);
+  try{
+    const checkKey = await deriveKeyForBlob(cur, blob);
+    await decryptJSON(checkKey, { iv: blob.iv, ct: blob.ct }); // throws if wrong
+  } catch(e){
+    err.textContent = e.message === 'argon2-unavailable' ? 'Argon2id module unavailable offline — connect and retry.' : 'Current password is incorrect.';
+    return;
+  }
+  const newSalt = crypto.getRandomValues(new Uint8Array(16));
+  const { key, kdfVersion, iterations, argon2 } = await deriveKeyBest(next, newSalt);
+  masterKey = key;
+  const payload = await encryptJSON(masterKey, vault);
+  const newBlob = { v:1, kdfVersion, salt: b64(newSalt), iterations, argon2, iv: payload.iv, ct: payload.ct };
+  await storageSet(STORAGE_KEY, JSON.stringify(newBlob));
+  document.getElementById('curMpw').value = '';
+  document.getElementById('newMpw').value = '';
+  toast('Master password changed.');
+}
+function printEmergencyKit(){
+  document.getElementById('kitDate').textContent = new Date().toLocaleDateString();
+  document.getElementById('appScreen').classList.add('hidden');
+  document.getElementById('emergencyKitView').classList.remove('hidden');
+  setTimeout(()=> window.print(), 150);
+}
+function saveSettings(){
+  settings.autoLock = parseInt(document.getElementById('autoLockSelect').value, 10);
+  settings.clipClear = document.getElementById('clipClearChk').checked;
+  settings.clipClearSecs = parseInt(document.getElementById('clipClearSecs').value, 10) || 20;
+  const lockOnBlurChk = document.getElementById('lockOnBlurChk');
+  if(lockOnBlurChk) settings.lockOnBlur = lockOnBlurChk.checked;
+  storageSet(SETTINGS_KEY, JSON.stringify(settings));
+  resetAutoLock();
+}
+
+/* ---------------- navigation ---------------- */
+function setView(v){
+  currentView = v;
+  currentFolder = null;
+  activeTagFilter = null;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===v));
+  renderFolderNav();
+  document.getElementById('itemsView').classList.toggle('hidden', v==='security' || v==='settings' || v==='trash');
+  document.getElementById('securityView').classList.toggle('hidden', v!=='security');
+  document.getElementById('settingsView').classList.toggle('hidden', v!=='settings');
+  document.getElementById('trashView').classList.toggle('hidden', v!=='trash');
+  const titles = { all:'ALL ITEMS', login:'LOGINS', card:'CARDS', note:'SECURE NOTES', recovery:'RECOVERY CODES', totp:'2FA / TOTP CODES', passkey:'PASSKEY LOG', security:'SECURITY AUDIT', settings:'SETTINGS', trash:'TRASH' };
+  document.getElementById('viewTitle').textContent = titles[v] || v.toUpperCase();
+  document.querySelector('.toolbar').style.display = (v==='security'||v==='settings'||v==='trash') ? 'none' : 'flex';
+  if(v==='security') renderSecurity();
+  if(v==='trash') renderTrash();
+  if(v!=='security' && v!=='settings' && v!=='trash') renderItems();
+}
+function renderAll(){
+  updateCounts();
+  renderFolderNav();
+  renderItems();
+}
+function setFolder(folder){
+  currentFolder = folder;
+  document.querySelectorAll('.folder-nav-item').forEach(n=>n.classList.toggle('active', n.dataset.folder===folder));
+  renderItems();
+}
+function renderFolderNav(){
+  const nav = document.getElementById('folderNav');
+  const header = document.getElementById('foldersHeader');
+  if(!vault){ nav.innerHTML=''; header.classList.add('hidden'); return; }
+  const folders = [...new Set(vault.items.filter(it=>!it.isDeleted).map(it=>it.folder).filter(Boolean))].sort();
+  if(folders.length===0){ nav.innerHTML=''; header.classList.add('hidden'); return; }
+  header.classList.remove('hidden');
+  nav.innerHTML = folders.map(f => `<div class="folder-nav-item ${currentFolder===f?'active':''}" data-folder="${esc(f)}" onclick="setFolder('${escJs(f)}')">📁 ${esc(f)}</div>`).join('');
+}
+function updateCounts(){
+  const c = { all:0, login:0, card:0, note:0, recovery:0, totp:0, passkey:0, trash:0 };
+  vault.items.forEach(it=>{
+    if(it.isDeleted){ c.trash++; return; }
+    c.all++; if(c[it.type]!==undefined) c[it.type]++;
+  });
+  Object.keys(c).forEach(k=>{ const el = document.getElementById('cnt-'+k); if(el) el.textContent = c[k]; });
+}
+
+/* ---------------- password analysis ---------------- */
+function getLoginItems(){ return vault.items.filter(i=>i.type==='login' && i.password && !i.isDeleted); }
+function computeReusedMap(){
+  const map = {};
+  getLoginItems().forEach(it=>{
+    if(!map[it.password]) map[it.password] = [];
+    map[it.password].push(it);
+  });
+  const reused = {};
+  Object.keys(map).forEach(pw=>{ if(map[pw].length > 1) reused[pw] = map[pw]; });
+  return reused;
+}
+
+/* ---------------- render item grid ---------------- */
+function renderItems(){
+  const grid = document.getElementById('itemsGrid');
+  const q = (document.getElementById('searchBox').value||'').toLowerCase();
+  const reusedMap = computeReusedMap();
+  let items = vault.items.filter(it => !it.isDeleted && (currentView==='all' || currentView==='tagfilter' || it.type===currentView));
+  if(currentFolder) items = items.filter(it => it.folder === currentFolder);
+  if(currentView==='tagfilter' && activeTagFilter) items = items.filter(it => (it.tags||[]).includes(activeTagFilter));
+  if(q){
+    items = items.filter(it => JSON.stringify(it).toLowerCase().includes(q));
+  }
+  items.sort((a,b)=> (b.updatedAt||0) - (a.updatedAt||0));
+  if(items.length===0){
+    grid.innerHTML = '<div class="empty-state">No items here yet. Click + Add Item to create one.</div>';
+    return;
+  }
+  grid.innerHTML = items.map(it => renderCard(it, reusedMap)).join('');
+}
+
+/* ---------------- trash ---------------- */
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+async function cleanupTrash(){
+  if(!vault) return;
+  const now = Date.now();
+  const before = vault.items.length;
+  vault.items = vault.items.filter(it => !(it.isDeleted && (now - (it.deletedAt||0)) > TRASH_RETENTION_MS));
+  if(vault.items.length !== before) await saveVaultToDisk();
+}
+function renderTrash(){
+  const grid = document.getElementById('trashGrid');
+  const trashed = vault.items.filter(it=>it.isDeleted).sort((a,b)=>(b.deletedAt||0)-(a.deletedAt||0));
+  if(trashed.length===0){ grid.innerHTML = '<div class="empty-state">Trash is empty.</div>'; return; }
+  grid.innerHTML = trashed.map(it=>{
+    const daysLeft = Math.max(0, 30 - Math.floor((Date.now()-(it.deletedAt||0))/86400000));
+    return `<div class="card bracket">
+      <div class="row1"><div class="title">${esc(it.title||'Untitled')}</div><div class="tag">${esc(it.type)}</div></div>
+      <div class="field"><span>deleted</span><span class="val">${new Date(it.deletedAt).toLocaleDateString()}</span></div>
+      <div class="field"><span>auto-purge in</span><span class="val">${daysLeft}d</span></div>
+      <div class="actions">
+        <button class="sm" onclick="restoreItem('${it.id}')">Restore</button>
+        <button class="sm danger ghost" onclick="permanentlyDeleteItem('${it.id}')">Delete Forever</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function restoreItem(id){
+  const it = vault.items.find(i=>i.id===id);
+  if(!it) return;
+  delete it.isDeleted; delete it.deletedAt;
+  it.updatedAt = Date.now();
+  await saveVaultToDisk();
+  updateCounts(); renderFolderNav(); renderTrash();
+  toast('Restored.');
+}
+async function permanentlyDeleteItem(id){
+  if(!confirm('Permanently delete this item? This cannot be undone.')) return;
+  vault.items = vault.items.filter(i=>i.id!==id);
+  await saveVaultToDisk();
+  updateCounts(); renderTrash();
+  toast('Permanently deleted.');
+}
+
+function renderCard(it, reusedMap){
+  const typeLabels = { login:'LOGIN', card:'CARD', note:'NOTE', recovery:'RECOVERY', totp:'2FA', passkey:'PASSKEY' };
+  let body = '';
+  let flags = '';
+  if(it.type==='login'){
+    const strength = estimateStrength(it.password);
+    body = `
+      <div class="field"><span>username</span><span class="val">${esc(it.username||'—')} ${it.username?`<button class="copybtn" onclick="copyText('${escJs(it.username)}','username')">copy</button>`:''}</span></div>
+      <div class="field"><span>password</span><span class="val mono-mask">${it.password?'••••••••':'—'} ${it.password?`<button class="copybtn" onclick="copyText('${escJs(it.password)}','password')">copy</button>`:''}</span></div>
+      ${it.url?`<div class="field"><span>url</span><span class="val">${esc(it.url)}</span></div>`:''}
+    `;
+    if(it.password){
+      flags += `<span class="flag ${strength.score<=1?'weak':'strong'}">${strength.label}</span> `;
+      if(reusedMap[it.password]) flags += `<span class="flag reused">REUSED (${reusedMap[it.password].length}×)</span> `;
+      if(it._breached) flags += `<span class="flag breached">BREACHED ×${it._breachedCount}</span>`;
+    }
+  } else if(it.type==='card'){
+    const last4 = (it.number||'').replace(/\s/g,'').slice(-4);
+    body = `
+      <div class="field"><span>number</span><span class="val">•••• •••• •••• ${last4||'----'} ${it.number?`<button class="copybtn" onclick="copyText('${escJs(it.number)}','card number')">copy</button>`:''}</span></div>
+      <div class="field"><span>expiry</span><span class="val">${esc(it.expiry||'—')}</span></div>
+      <div class="field"><span>cardholder</span><span class="val">${esc(it.cardholder||'—')}</span></div>
+    `;
+  } else if(it.type==='note'){
+    body = `<div class="field" style="display:block;"><span class="val">${esc((it.content||'').slice(0,120))}${(it.content||'').length>120?'…':''}</span></div>`;
+  } else if(it.type==='recovery'){
+    const codes = it.codes||[];
+    body = `
+      <div class="field"><span>service</span><span class="val">${esc(it.service||'—')}</span></div>
+      <div class="field"><span>codes remaining</span><span class="val">${codes.length}</span></div>
+    `;
+  } else if(it.type==='totp'){
+    body = `<div id="totp-${it.id}" class="field" style="display:block;"></div>`;
+  } else if(it.type==='passkey'){
+    body = `
+      <div class="field"><span>site</span><span class="val">${esc(it.site||'—')}</span></div>
+      <div class="field"><span>account</span><span class="val">${esc(it.username||'—')}</span></div>
+      <div class="note-box info" style="margin-top:8px;font-size:10px;">Reference only — the actual passkey lives in your browser/OS/security key and can't be exported here.</div>
+    `;
+  }
+  const tagsHtml = (it.tags||[]).map(t=>`<span class="tag-chip" onclick="filterByTag('${escJs(t)}')">#${esc(t)}</span>`).join('');
+  const folderHtml = it.folder ? `<span class="folder-badge" onclick="setFolder('${escJs(it.folder)}')">📁 ${esc(it.folder)}</span>` : '';
+  const html = `
+    <div class="card bracket">
+      <div class="row1">
+        <div class="title">${esc(it.title||'Untitled')}</div>
+        <div class="tag">${typeLabels[it.type]||it.type}</div>
+      </div>
+      ${body}
+      ${flags ? `<div>${flags}</div>` : ''}
+      ${folderHtml}
+      ${tagsHtml ? `<div>${tagsHtml}</div>` : ''}
+      <div class="actions">
+        <button class="sm" onclick="openEditModal('${it.id}')">Edit</button>
+        <button class="sm danger ghost" onclick="deleteItem('${it.id}')">Delete</button>
+      </div>
+    </div>`;
+  if(it.type==='totp') setTimeout(()=>renderTotpCard(it), 0);
+  return html;
+}
+function escJs(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+/* ---------------- clipboard ---------------- */
+async function copyText(text, label){
+  try{
+    await navigator.clipboard.writeText(text);
+    toast(label + ' copied' + (settings.clipClear ? ` (clears in ${settings.clipClearSecs}s)` : ''));
+    if(settings.clipClear){
+      setTimeout(async ()=>{
+        try{
+          const cur = await navigator.clipboard.readText();
+          if(cur === text) await navigator.clipboard.writeText('');
+        }catch(e){ /* clipboard read may be blocked; ignore */ }
+      }, settings.clipClearSecs*1000);
+    }
+  } catch(e){
+    toast('Clipboard access denied by browser.', true);
+  }
+}
+
+/* ---------------- TOTP (RFC 6238) ---------------- */
+function base32Decode(b32){
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  b32 = b32.replace(/=+$/,'').toUpperCase().replace(/\s/g,'');
+  let bits = '';
+  for(const c of b32){
+    const idx = alphabet.indexOf(c);
+    if(idx===-1) continue;
+    bits += idx.toString(2).padStart(5,'0');
+  }
+  const bytes = [];
+  for(let i=0;i+8<=bits.length;i+=8){ bytes.push(parseInt(bits.substr(i,8),2)); }
+  return new Uint8Array(bytes);
+}
+async function totpCode(secretB32, stepSeconds){
+  stepSeconds = stepSeconds || 30;
+  const keyBytes = base32Decode(secretB32);
+  if(keyBytes.length===0) return null;
+  const counter = Math.floor(Date.now()/1000/stepSeconds);
+  const buf = new ArrayBuffer(8);
+  const view = new DataView(buf);
+  view.setUint32(4, counter);
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name:'HMAC', hash:'SHA-1' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, buf));
+  const offset = sig[sig.length-1] & 0x0f;
+  const bin = ((sig[offset]&0x7f)<<24) | ((sig[offset+1]&0xff)<<16) | ((sig[offset+2]&0xff)<<8) | (sig[offset+3]&0xff);
+  const code = (bin % 1000000).toString().padStart(6,'0');
+  const secondsInStep = Math.floor(Date.now()/1000) % stepSeconds;
+  return { code, remaining: stepSeconds - secondsInStep };
+}
+async function renderTotpCard(it){
+  const el = document.getElementById('totp-'+it.id);
+  if(!el) return;
+  const result = await totpCode(it.secret);
+  if(!result){ el.innerHTML = '<span style="color:var(--red);font-size:11px;">invalid secret</span>'; return; }
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:10px;color:var(--dim);">${esc(it.issuer||'')} ${esc(it.account||'')}</div>
+        <div class="totp-code">${result.code}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:18px;color:var(--yellow);">${result.remaining}s</div>
+        <button class="copybtn" onclick="copyText('${result.code}','code')">copy</button>
+      </div>
+    </div>`;
+}
+setInterval(()=>{
+  if(vault && (currentView==='totp' || currentView==='all')){
+    vault.items.filter(i=>i.type==='totp').forEach(it=>renderTotpCard(it));
+  }
+}, 1000);
+
+/* ---------------- breach check (HIBP k-anonymity) ---------------- */
+async function runBreachCheck(){
+  const btn = document.getElementById('breachCheckBtn');
+  btn.disabled = true; btn.textContent = 'Checking...';
+  const logins = getLoginItems();
+  const cache = {};
+  let breachedCount = 0;
+  for(const it of logins){
+    if(!it.password) continue;
+    if(cache[it.password] === undefined){
+      try{
+        const hash = await sha1Hex(it.password);
+        const prefix = hash.slice(0,5), suffix = hash.slice(5);
+        const res = await fetch('https://api.pwnedpasswords.com/range/'+prefix);
+        if(!res.ok) throw new Error('lookup failed');
+        const text = await res.text();
+        const match = text.split('\n').find(line => line.split(':')[0] === suffix);
+        cache[it.password] = match ? parseInt(match.split(':')[1].trim(),10) : 0;
+      } catch(e){
+        cache[it.password] = null; // network/error — unknown
+      }
+    }
+    const count = cache[it.password];
+    if(count){ it._breached = true; it._breachedCount = count; breachedCount++; }
+    else { it._breached = false; }
+  }
+  btn.disabled = false; btn.textContent = 'Run Breach Check (all logins)';
+  toast(breachedCount>0 ? `Found ${breachedCount} breached password(s).` : 'No breached passwords found.', breachedCount>0);
+  renderSecurity();
+  if(currentView!=='security') renderItems();
+}
+
+function renderSecurity(){
+  const logins = getLoginItems();
+  const reusedMap = computeReusedMap();
+  const reusedItems = Object.values(reusedMap).flat();
+  const weakItems = logins.filter(it => estimateStrength(it.password).score <= 1);
+  const breachedItems = logins.filter(it => it._breached);
+
+  document.getElementById('secTotal').textContent = vault.items.length;
+  document.getElementById('secReused').textContent = new Set(reusedItems.map(i=>i.password)).size;
+  document.getElementById('secWeak').textContent = weakItems.length;
+  document.getElementById('secBreached').textContent = breachedItems.length;
+
+  const reusedGroups = Object.entries(reusedMap);
+  document.getElementById('reusedList').innerHTML = reusedGroups.length ? reusedGroups.map(([pw,items])=>
+    `<div class="list-issue"><div><div class="l-title">${items.map(i=>esc(i.title)).join(', ')}</div><div class="l-note">share the same password</div></div><span class="flag reused">${items.length}× reused</span></div>`
+  ).join('') : '<div class="empty-state">No reused passwords found.</div>';
+
+  document.getElementById('weakList').innerHTML = weakItems.length ? weakItems.map(it=>
+    `<div class="list-issue"><div><div class="l-title">${esc(it.title)}</div><div class="l-note">${estimateStrength(it.password).label.toLowerCase()}</div></div><span class="flag weak">weak</span></div>`
+  ).join('') : '<div class="empty-state">No weak passwords found.</div>';
+
+  document.getElementById('breachedList').innerHTML = breachedItems.length ? breachedItems.map(it=>
+    `<div class="list-issue"><div><div class="l-title">${esc(it.title)}</div><div class="l-note">seen in ${it._breachedCount.toLocaleString()} breaches</div></div><span class="flag breached">change now</span></div>`
+  ).join('') : '<div class="empty-state">Run a breach check to populate this.</div>';
+}
+
+/* ---------------- add / edit modal ---------------- */
+function openAddModal(){
+  editingId = null;
+  const type = currentView==='all' || currentView==='security' || currentView==='settings' ? 'login' : currentView;
+  showModal(null, type);
+}
+function openEditModal(id){
+  editingId = id;
+  const it = vault.items.find(i=>i.id===id);
+  showModal(it, it.type);
+}
+function closeModal(){ document.getElementById('modalOverlay').classList.add('hidden'); }
+
+function showModal(it, type){
+  it = it || { type };
+  document.getElementById('modalTitle').textContent = (editingId ? 'Edit ' : 'Add ') + type;
+  const body = document.getElementById('modalBody');
+  let fields = `
+    <label>Type</label>
+    <select id="f_type" ${editingId?'disabled':''} onchange="showModal(null, this.value)">
+      <option value="login" ${type==='login'?'selected':''}>Login</option>
+      <option value="card" ${type==='card'?'selected':''}>Card</option>
+      <option value="note" ${type==='note'?'selected':''}>Secure Note</option>
+      <option value="recovery" ${type==='recovery'?'selected':''}>Recovery Codes</option>
+      <option value="totp" ${type==='totp'?'selected':''}>2FA / TOTP</option>
+      <option value="passkey" ${type==='passkey'?'selected':''}>Passkey Log Entry</option>
+    </select>
+    <label>Title</label>
+    <input id="f_title" type="text" value="${esc(it.title||'')}" placeholder="e.g. GitHub">
+    <div class="two-col">
+      <div><label>Folder</label><input id="f_folder" list="folderList" value="${esc(it.folder||'')}" placeholder="e.g. Work"><datalist id="folderList">${[...new Set(vault.items.map(i=>i.folder).filter(Boolean))].map(f=>`<option value="${esc(f)}">`).join('')}</datalist></div>
+      <div><label>Tags (comma separated)</label><input id="f_tags" value="${esc((it.tags||[]).join(', '))}" placeholder="e.g. finance, urgent"></div>
+    </div>
+  `;
+  if(type==='login'){
+    fields += `
+      <div class="two-col">
+        <div><label>Username</label><input id="f_username" value="${esc(it.username||'')}"></div>
+        <div><label>URL</label><input id="f_url" value="${esc(it.url||'')}" oninput="checkDuplicateUrl('${editingId||''}')"></div>
+      </div>
+      <div id="dupUrlWarn"></div>
+      <label>Password</label>
+      <div class="field-row">
+        <input id="f_password" type="text" value="${esc(it.password||'')}" oninput="updateStrength('f_password','modalStrengthFill','modalStrengthLabel')">
+        <button class="sm" onclick="genPassword()">Generate</button>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10.5px;color:var(--dim);">
+        <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="genModeDiceware" style="width:auto;"> Passphrase mode (diceware)</label>
+        <label class="checkbox-row" style="margin:0;"><input type="checkbox" id="genExcludeAmbig" style="width:auto;" checked> Exclude ambiguous (l/1/I/O/0)</label>
+      </div>
+      <div class="strength-bar"><i id="modalStrengthFill"></i></div>
+      <div class="strength-label" id="modalStrengthLabel">&nbsp;</div>
+      <label>Notes</label>
+      <textarea id="f_notes">${esc(it.notes||'')}</textarea>
+      ${(it.history && it.history.length) ? `
+        <div class="history-toggle" onclick="document.getElementById('historyList').classList.toggle('hidden')">▸ Password history (${it.history.length})</div>
+        <div id="historyList" class="history-list hidden">
+          ${it.history.slice().reverse().map(h=>`<div class="history-row"><span class="h-pw">${esc(h.password)}</span><span class="h-date">${new Date(h.changedAt).toLocaleDateString()} <button class="copybtn" onclick="copyText('${escJs(h.password)}','old password')">copy</button></span></div>`).join('')}
+        </div>
+      ` : ''}
+    `;
+  } else if(type==='card'){
+    fields += `
+      <label>Cardholder Name</label><input id="f_cardholder" value="${esc(it.cardholder||'')}">
+      <label>Card Number</label><input id="f_number" value="${esc(it.number||'')}">
+      <div class="two-col">
+        <div><label>Expiry (MM/YY)</label><input id="f_expiry" value="${esc(it.expiry||'')}"></div>
+        <div><label>CVV</label><input id="f_cvv" type="text" value="${esc(it.cvv||'')}"></div>
+      </div>
+      <label>Notes</label><textarea id="f_notes">${esc(it.notes||'')}</textarea>
+    `;
+  } else if(type==='note'){
+    fields += `<label>Content</label><textarea id="f_content" style="min-height:160px;">${esc(it.content||'')}</textarea>`;
+  } else if(type==='recovery'){
+    fields += `
+      <label>Service</label><input id="f_service" value="${esc(it.service||'')}">
+      <label>Codes (one per line)</label>
+      <textarea id="f_codes" style="min-height:140px;">${esc((it.codes||[]).join('\n'))}</textarea>
+      <label>Notes</label><textarea id="f_notes">${esc(it.notes||'')}</textarea>
+    `;
+  } else if(type==='totp'){
+    fields += `
+      <div class="two-col">
+        <div><label>Issuer</label><input id="f_issuer" value="${esc(it.issuer||'')}" placeholder="e.g. Google"></div>
+        <div><label>Account</label><input id="f_account" value="${esc(it.account||'')}" placeholder="e.g. you@email.com"></div>
+      </div>
+      <label>Secret (base32)</label>
+      <input id="f_secret" value="${esc(it.secret||'')}" placeholder="JBSWY3DPEHPK3PXP">
+      <div class="note-box info">Paste the base32 secret shown when the site sets up 2FA (usually under the QR code as "can't scan? enter this key manually").</div>
+    `;
+  } else if(type==='passkey'){
+    fields += `
+      <label>Site</label><input id="f_site" value="${esc(it.site||'')}">
+      <label>Account / Username</label><input id="f_username" value="${esc(it.username||'')}">
+      <label>Notes</label><textarea id="f_notes">${esc(it.notes||'')}</textarea>
+      <div class="note-box">This is a reference log only. The real passkey credential stays in your browser/OS keychain or security key — it's non-exportable by design, so no tool (including this one) can actually store or back it up.</div>
+    `;
+  }
+  body.innerHTML = fields;
+  document.getElementById('modalOverlay').classList.remove('hidden');
+  if(type==='login'){
+    updateStrength('f_password','modalStrengthFill','modalStrengthLabel');
+    checkDuplicateUrl(editingId||'');
+  }
+}
+
+function normalizeHost(url){
+  if(!url) return '';
+  try{
+    const u = new URL(url.includes('://') ? url : 'https://'+url);
+    return u.hostname.replace(/^www\./,'').toLowerCase();
+  }catch(e){ return url.trim().toLowerCase(); }
+}
+function checkDuplicateUrl(excludeId){
+  const urlEl = document.getElementById('f_url');
+  const warnEl = document.getElementById('dupUrlWarn');
+  if(!urlEl || !warnEl) return;
+  const host = normalizeHost(urlEl.value);
+  warnEl.innerHTML = '';
+  if(!host) return;
+  const dupes = vault.items.filter(it => it.type==='login' && !it.isDeleted && it.id!==excludeId && it.url && normalizeHost(it.url)===host);
+  if(dupes.length){
+    warnEl.innerHTML = `<div class="note-box warn2">You already have ${dupes.length} login item(s) for <b>${esc(host)}</b>: ${dupes.map(d=>esc(d.title)).join(', ')}. Consider editing the existing one instead of creating a duplicate.</div>`;
+  }
+}
+
+function secureRandomInt(maxExclusive){
+  // uniform random int in [0, maxExclusive) via rejection sampling — avoids modulo bias
+  const range = 256 - (256 % maxExclusive);
+  let byte;
+  do{ byte = crypto.getRandomValues(new Uint8Array(1))[0]; } while(byte >= range);
+  return byte % maxExclusive;
+}
+function genPassword(){
+  const diceware = document.getElementById('genModeDiceware').checked;
+  const excludeAmbig = document.getElementById('genExcludeAmbig').checked;
+  let pw;
+  if(diceware){
+    const wordCount = 6; // ~ 1296^6 combinations, well above 77 bits
+    const words = [];
+    for(let i=0;i<wordCount;i++) words.push(DICEWARE_WORDS[secureRandomInt(DICEWARE_WORDS.length)]);
+    // sprinkle a random digit in for sites that require one
+    const digitPos = secureRandomInt(wordCount);
+    words[digitPos] = words[digitPos] + secureRandomInt(10);
+    pw = words.join('-');
+  } else {
+    const len = 20;
+    let chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+';
+    if(!excludeAmbig){
+      chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+';
+    }
+    let out = '';
+    for(let i=0;i<len;i++) out += chars[secureRandomInt(chars.length)];
+    pw = out;
+  }
+  document.getElementById('f_password').value = pw;
+  updateStrength('f_password','modalStrengthFill','modalStrengthLabel');
+}
+
+async function saveItemFromModal(){
+  const type = document.getElementById('f_type').value;
+  const title = document.getElementById('f_title').value.trim() || 'Untitled';
+  let it = editingId ? vault.items.find(i=>i.id===editingId) : { id: uid(), type, createdAt: Date.now() };
+  it.type = type; it.title = title; it.updatedAt = Date.now();
+  it.folder = (document.getElementById('f_folder').value||'').trim();
+  it.tags = (document.getElementById('f_tags').value||'').split(',').map(t=>t.trim()).filter(Boolean);
+
+  if(type==='login'){
+    const newPw = document.getElementById('f_password').value;
+    if(editingId && it.password && it.password !== newPw){
+      it.history = it.history || [];
+      it.history.push({ password: it.password, changedAt: Date.now() });
+      if(it.history.length > 10) it.history = it.history.slice(-10);
+    }
+    it.username = document.getElementById('f_username').value;
+    it.url = document.getElementById('f_url').value;
+    it.password = newPw;
+    it.notes = document.getElementById('f_notes').value;
+  } else if(type==='card'){
+    it.cardholder = document.getElementById('f_cardholder').value;
+    it.number = document.getElementById('f_number').value;
+    it.expiry = document.getElementById('f_expiry').value;
+    it.cvv = document.getElementById('f_cvv').value;
+    it.notes = document.getElementById('f_notes').value;
+  } else if(type==='note'){
+    it.content = document.getElementById('f_content').value;
+  } else if(type==='recovery'){
+    it.service = document.getElementById('f_service').value;
+    it.codes = document.getElementById('f_codes').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    it.notes = document.getElementById('f_notes').value;
+  } else if(type==='totp'){
+    it.issuer = document.getElementById('f_issuer').value;
+    it.account = document.getElementById('f_account').value;
+    it.secret = document.getElementById('f_secret').value.replace(/\s/g,'');
+  } else if(type==='passkey'){
+    it.site = document.getElementById('f_site').value;
+    it.username = document.getElementById('f_username').value;
+    it.notes = document.getElementById('f_notes').value;
+  }
+
+  if(!editingId) vault.items.push(it);
+  await saveVaultToDisk();
+  closeModal();
+  updateCounts();
+  renderFolderNav();
+  renderItems();
+  toast('Saved.');
+}
+
+async function deleteItem(id){
+  if(!confirm('Move this item to Trash? It will be permanently deleted after 30 days.')) return;
+  const it = vault.items.find(i=>i.id===id);
+  if(!it) return;
+  it.isDeleted = true;
+  it.deletedAt = Date.now();
+  await saveVaultToDisk();
+  updateCounts();
+  renderFolderNav();
+  renderItems();
+  toast('Moved to Trash.');
+}
+</script>
+</body>
+</html>

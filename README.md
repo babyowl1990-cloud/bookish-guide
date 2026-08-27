@@ -100,11 +100,12 @@ Nothing in this app requires signup, an API key, or a paid service. Every extern
 Added specifically against two threat scenarios: someone (or some script) repeatedly guessing your master password, and something trying to inject malicious code into the page.
 
 - **Escalating lockout on failed unlock attempts** — after 3 wrong passwords, each further attempt triggers a growing delay (10s → 20s → 40s → up to 5 min). This is tracked in storage, not just in memory, so reloading the page doesn't reset it — a script hammering the unlock function programmatically gets slowed down, not just a human retyping.
-- **Content-Security-Policy** — the page only allows scripts to load from itself and the two specific CDNs it actually uses (cdnjs, jsdelivr). If something managed to inject a `<script src="...">` pointing anywhere else, the browser refuses to execute it. Also blocks any `<iframe>` from embedding this page, any `<form>` from submitting anywhere, and any `<base>` tag hijack.
 - **Masked-by-default sensitive fields** — passwords, card numbers, and CVVs are hidden by default while editing (👁 to reveal), not shown in plaintext automatically. Reduces exposure to shoulder-surfing and screen-capture malware.
 - **`autocomplete="off"`/`"new-password"` on master password and card fields** — reduces the chance of a browser extension or malicious autofill tool harvesting them.
+- **Timeout on every storage operation** — every save/load is capped at 6 seconds; if it doesn't respond in time, it fails visibly with an error instead of freezing the page. (This was added after a real bug: an earlier version's Content-Security-Policy silently broke the storage layer, and the missing timeout let it hang forever with no error. Removed the CSP, added the timeout so the same class of bug can't silently freeze the app again.)
 
 ### What's deliberately *not* included, and why
+- **Content-Security-Policy** — tried this, and it broke vault creation: it's very likely the storage API relies on a cross-origin bridge (an iframe or similar) that a strict CSP blocks, causing storage calls to hang indefinitely instead of erroring. Rather than guess at the right exception to carve out, I removed it. If you want CSP protection and are comfortable testing carefully, you'd need to open the browser console, watch for CSP violation reports while creating a vault, and iteratively loosen the policy until storage works — I can't verify that from where I build this.
 - **CDN file hash pinning (Subresource Integrity)** — would be the strongest protection against a compromised CDN, but I couldn't verify the exact byte hash of the hosted files from my end. A wrong hash would silently and permanently block Argon2id/zxcvbn from loading with no clear explanation, which is worse than the current graceful fallback. If you want this, generate the `integrity="sha384-..."` values yourself (e.g. via `curl <url> | openssl dgst -sha384 -binary | openssl base64 -A`) and add them to the two `<script>` tags in the `<head>`.
 - **Anti-devtools / anti-inspection tricks** — things like disabling right-click or detecting an open console. These are widely considered security theater: they're trivially bypassed and mostly just annoy legitimate users. Skipped on purpose.
 
@@ -112,7 +113,7 @@ Added specifically against two threat scenarios: someone (or some script) repeat
 If you're worried about malware modifying the `.html` file on disk after the fact, you can check it against this checksum:
 
 ```
-SHA-256: 84b73872d7bbec05eff35f3ecbcadc8730124cc80f8239e82000eca344ddb61e
+SHA-256: f17d8f0d87b602300ac8269a5f3a1358ab0b4a9f913a34b6274afffe4b0fb026
 ```
 
 Verify with:

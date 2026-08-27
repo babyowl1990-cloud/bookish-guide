@@ -33,7 +33,7 @@ Every item can also have a **folder** (one) and **tags** (many) for organizing.
 
 - **Key derivation:** Argon2id (memory-hard, OWASP baseline params) for new vaults, with an automatic silent upgrade path for older vaults. If Argon2id can't load (no internet on first use), it falls back to PBKDF2 at 600,000 rounds — still strong, just not the newer algorithm.
 - **Encryption:** AES-256-GCM for the vault contents.
-- **Where it's stored:** the encrypted blob lives in the browser's app-level storage, tied to your account on this device. It is not readable without your master password — the app itself never has a "backdoor" into it.
+- **Where it's stored:** the encrypted blob lives in `localStorage`, scoped to this file in your browser. It is not readable without your master password — the app itself never has a "backdoor" into it.
 - **Auto-lock:** clears the decryption key from memory after inactivity (configurable), and optionally on tab-switch/window-blur too.
 - **Clipboard:** copied passwords auto-clear after a configurable delay.
 
@@ -42,13 +42,16 @@ Every item can also have a **folder** (one) and **tags** (many) for organizing.
 - Argon2id and the strength meter (zxcvbn) load from a CDN. If you're fully offline the first time you use a feature, it falls back gracefully rather than breaking — but it does mean a working connection is needed at least once.
 - Biometric unlock relies on your browser/authenticator supporting the WebAuthn `prf` extension. Not all browsers do yet (Safari doesn't as of writing). If it's not supported, you'll just see no biometric option — nothing breaks, password unlock always works.
 - "Memory zeroization" is best-effort. JavaScript can't guarantee true memory erasure (garbage collection can leave copies) — this hardens what it can, but isn't a cryptographic guarantee.
+- **`localStorage` is tied to exactly how you open the file.** If your browser treats `file:///path/to/cipher_vault.html` as its own storage origin (most do), then moving, renaming, or opening a different copy of the file can look like a "different" vault to the browser, even though the file content is identical. If your data ever seems to vanish, check that you're opening the exact same file path as before, in the exact same browser, before assuming something's wrong.
 
 ---
 
 ## ⚠ Things That Will Actually Break Things
 
+- **Don't move or rename the file after you've started using it**, for the reason above — your browser may treat that as an entirely different vault location.
 - **Don't open the same vault in two tabs/windows and edit in both.** Storage writes don't merge — the last save wins, and the other tab's changes can be silently lost. Use one tab at a time.
-- **Don't clear your browser's site data for this page** unless you've exported a backup first — that's how the vault is stored, and clearing it deletes the vault.
+- **Don't clear your browser's site data / "cookies and other site data"** for this page unless you've exported a backup first — that's how the vault is stored, and clearing it deletes the vault.
+- **Private/incognito windows may not persist data at all** — some browsers isolate or block storage there. If you see a yellow banner at the top saying storage isn't available, switch to a normal window before entering anything you care about.
 - **Don't lose your master password.** There is no reset, no recovery email, no "forgot password" — that's the whole point of it being real encryption. This is exactly what the **Emergency Kit** (Settings → Emergency Kit) is for: print it, hand-write your password on the paper copy, and store that somewhere physically secure.
 - **If you switch browsers or devices, your vault doesn't come with you automatically.** Export an encrypted backup (Settings → Backup) and import it on the new device/browser.
 
@@ -102,18 +105,25 @@ Added specifically against two threat scenarios: someone (or some script) repeat
 - **Escalating lockout on failed unlock attempts** — after 3 wrong passwords, each further attempt triggers a growing delay (10s → 20s → 40s → up to 5 min). This is tracked in storage, not just in memory, so reloading the page doesn't reset it — a script hammering the unlock function programmatically gets slowed down, not just a human retyping.
 - **Masked-by-default sensitive fields** — passwords, card numbers, and CVVs are hidden by default while editing (👁 to reveal), not shown in plaintext automatically. Reduces exposure to shoulder-surfing and screen-capture malware.
 - **`autocomplete="off"`/`"new-password"` on master password and card fields** — reduces the chance of a browser extension or malicious autofill tool harvesting them.
-- **Timeout on every storage operation** — every save/load is capped at 6 seconds; if it doesn't respond in time, it fails visibly with an error instead of freezing the page. (This was added after a real bug: an earlier version's Content-Security-Policy silently broke the storage layer, and the missing timeout let it hang forever with no error. Removed the CSP, added the timeout so the same class of bug can't silently freeze the app again.)
+- **Graceful storage fallback** — if `localStorage` isn't available at all (e.g. certain private-browsing configurations), the app shows a visible warning banner and keeps working for the session instead of silently losing your data — you just won't have anything saved once you close the tab.
 
 ### What's deliberately *not* included, and why
-- **Content-Security-Policy** — tried this, and it broke vault creation: it's very likely the storage API relies on a cross-origin bridge (an iframe or similar) that a strict CSP blocks, causing storage calls to hang indefinitely instead of erroring. Rather than guess at the right exception to carve out, I removed it. If you want CSP protection and are comfortable testing carefully, you'd need to open the browser console, watch for CSP violation reports while creating a vault, and iteratively loosen the policy until storage works — I can't verify that from where I build this.
+- **Content-Security-Policy** — tried this, and it broke vault creation: it turned out to be blocking storage entirely (see below). Removed it rather than guess at the right exception to carve out — I can't verify CSP behavior against this app's storage from where I build it.
 - **CDN file hash pinning (Subresource Integrity)** — would be the strongest protection against a compromised CDN, but I couldn't verify the exact byte hash of the hosted files from my end. A wrong hash would silently and permanently block Argon2id/zxcvbn from loading with no clear explanation, which is worse than the current graceful fallback. If you want this, generate the `integrity="sha384-..."` values yourself (e.g. via `curl <url> | openssl dgst -sha384 -binary | openssl base64 -A`) and add them to the two `<script>` tags in the `<head>`.
 - **Anti-devtools / anti-inspection tricks** — things like disabling right-click or detecting an open console. These are widely considered security theater: they're trivially bypassed and mostly just annoy legitimate users. Skipped on purpose.
+
+### Version history worth knowing about
+Two bugs were introduced and fixed during hardening, in case you're on an older copy of this file:
+1. An added Content-Security-Policy blocked the storage mechanism entirely, freezing the "Deriving key…" button forever with no error. Fixed by removing the CSP.
+2. Persistence was originally built on `window.storage`, an API that only exists inside Claude's own in-chat preview — not in a real browser opening this file directly, which caused an immediate `"Cannot read properties of undefined (reading 'set')"` error. Fixed by switching to standard `localStorage`.
+
+If you're running a copy from before both of these fixes, re-download the current version.
 
 ### Verifying this file hasn't been altered since I generated it
 If you're worried about malware modifying the `.html` file on disk after the fact, you can check it against this checksum:
 
 ```
-SHA-256: f17d8f0d87b602300ac8269a5f3a1358ab0b4a9f913a34b6274afffe4b0fb026
+SHA-256: a4bad7be97d2aef6b57584d8268df240e651d30e56da190ab30f00e4bc3f00bf
 ```
 
 Verify with:

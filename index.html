@@ -4,17 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CIPHERVAULT // Identity &amp; Credential Vault</title>
-<meta http-equiv="Content-Security-Policy" content="
-  default-src 'self';
-  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
-  connect-src 'self' https://api.pwnedpasswords.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' data:;
-  object-src 'none';
-  base-uri 'none';
-  frame-ancestors 'none';
-  form-action 'none';
-">
 <!-- Optional strength analyzer: falls back to a local heuristic if this fails to load (e.g. offline) -->
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js" onerror="window.__zxcvbnFailed=true"></script>
 <style>
@@ -656,16 +645,28 @@ async function sha1Hex(str){
 }
 
 /* ---------------- storage (persistent, per-user) ---------------- */
+// Hard timeout on every storage call — if the underlying API ever hangs instead of
+// rejecting (which is what caused a prior bug: a stuck "Deriving key…" button that
+// never recovered), this forces it to fail visibly after 6s instead of freezing forever.
+function withTimeout(promise, ms, label){
+  return new Promise((resolve, reject)=>{
+    const timer = setTimeout(()=> reject(new Error((label||'Operation') + ' timed out')), ms);
+    Promise.resolve(promise).then(
+      v=>{ clearTimeout(timer); resolve(v); },
+      e=>{ clearTimeout(timer); reject(e); }
+    );
+  });
+}
 async function storageGet(key){
-  try{ const r = await window.storage.get(key, false); return r ? r.value : null; }
+  try{ const r = await withTimeout(window.storage.get(key, false), 6000, 'storage read'); return r ? r.value : null; }
   catch(e){ return null; }
 }
 async function storageSet(key, value){
-  try{ return await window.storage.set(key, value, false); }
+  try{ return await withTimeout(window.storage.set(key, value, false), 6000, 'storage write'); }
   catch(e){ toast('Storage write failed: '+e.message, true); return null; }
 }
 async function storageDelete(key){
-  try{ return await window.storage.delete(key, false); } catch(e){ return null; }
+  try{ return await withTimeout(window.storage.delete(key, false), 6000, 'storage delete'); } catch(e){ return null; }
 }
 
 /* ---------------- boot ---------------- */
@@ -789,19 +790,24 @@ async function createVault(){
   err.textContent = '';
   if(pw.length < 8){ err.textContent = 'Master password must be at least 8 characters.'; return; }
   if(pw !== pw2){ err.textContent = 'Passwords do not match.'; return; }
-  const salt = crypto.getRandomValues(new Uint8Array(16));
   const btn = document.querySelector('#setupCard button.primary');
   if(btn){ btn.disabled = true; btn.textContent = 'Deriving key…'; }
-  const { key, kdfVersion, iterations, argon2 } = await deriveKeyBest(pw, salt);
-  if(btn){ btn.disabled = false; btn.textContent = 'Create Vault →'; }
-  masterKey = key;
-  vault = { items: [] };
-  const payload = await encryptJSON(masterKey, vault);
-  const blob = { v:1, kdfVersion, salt: b64(salt), iterations, argon2, iv: payload.iv, ct: payload.ct };
-  await storageSet(STORAGE_KEY, JSON.stringify(blob));
-  document.getElementById('setupPw').value = ''; document.getElementById('setupPw2').value = '';
-  toast('Vault created with ' + (kdfVersion===2 ? 'Argon2id' : 'PBKDF2') + ' key derivation.');
-  enterApp();
+  try{
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const { key, kdfVersion, iterations, argon2 } = await deriveKeyBest(pw, salt);
+    masterKey = key;
+    vault = { items: [] };
+    const payload = await encryptJSON(masterKey, vault);
+    const blob = { v:1, kdfVersion, salt: b64(salt), iterations, argon2, iv: payload.iv, ct: payload.ct };
+    await storageSet(STORAGE_KEY, JSON.stringify(blob));
+    document.getElementById('setupPw').value = ''; document.getElementById('setupPw2').value = '';
+    toast('Vault created with ' + (kdfVersion===2 ? 'Argon2id' : 'PBKDF2') + ' key derivation.');
+    enterApp();
+  } catch(e){
+    err.textContent = 'Something went wrong creating the vault: ' + (e.message || 'unknown error') + '. Nothing was saved — try again.';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Create Vault →'; }
+  }
 }
 async function unlockVault(){
   const pw = document.getElementById('unlockPw').value;
@@ -811,19 +817,24 @@ async function unlockVault(){
   if(stillLocked) return;
   const btn = document.querySelector('#unlockCard button.primary');
   if(btn){ btn.disabled = true; btn.textContent = 'Deriving key…'; }
-  const result = await unlockWithPassword(pw);
-  if(btn){ btn.disabled = false; btn.textContent = 'Unlock →'; }
-  if(result.ok){
-    document.getElementById('unlockPw').value = '';
-    toast('Vault unlocked.');
-    await clearLockoutState();
-  } else {
-    err.textContent = result.err;
-    // Only count actual wrong-password guesses toward lockout — not "argon2 unavailable" or "no vault" states.
-    if(!result.err.includes('Argon2id') && !result.err.includes('No vault') && !result.err.includes('corrupted')){
-      const state = await recordFailedAttempt();
-      if(state.lockedUntil > Date.now()) await refreshLockoutUI();
+  try{
+    const result = await unlockWithPassword(pw);
+    if(result.ok){
+      document.getElementById('unlockPw').value = '';
+      toast('Vault unlocked.');
+      await clearLockoutState();
+    } else {
+      err.textContent = result.err;
+      // Only count actual wrong-password guesses toward lockout — not "argon2 unavailable" or "no vault" states.
+      if(!result.err.includes('Argon2id') && !result.err.includes('No vault') && !result.err.includes('corrupted')){
+        const state = await recordFailedAttempt();
+        if(state.lockedUntil > Date.now()) await refreshLockoutUI();
+      }
     }
+  } catch(e){
+    err.textContent = 'Unexpected error unlocking: ' + (e.message || 'unknown error') + '. Try again.';
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Unlock →'; }
   }
 }
 // Core unlock routine shared by the password field and biometric unlock.

@@ -282,6 +282,9 @@ textarea{ resize:vertical; min-height:70px; }
 <div class="warn-banner">
   ⚠ <b>EXPERIMENTAL / TESTING BUILD.</b> This is a hobby project, not audited or professionally reviewed. Don't rely on it as your only password manager — keep a backup elsewhere and don't trust it with anything you can't afford to lose access to.
 </div>
+<div id="storageWarnBanner" class="warn-banner hidden" style="background:repeating-linear-gradient(135deg,#3a2a0b,#3a2a0b 10px,#4a3a0f 10px,#4a3a0f 20px);border-bottom-color:var(--yellow);color:#fff3d6;">
+  ⚠ <b>Persistent storage is unavailable in this browser context.</b> Nothing you enter will be saved once you close this tab. Try opening this file directly in Chrome/Edge/Firefox (not inside another app's embedded browser), or if you're using private/incognito mode, switch to a normal window.
+</div>
 
 <div class="topbar">
   <div class="brand">
@@ -510,7 +513,7 @@ textarea{ resize:vertical; min-height:70px; }
 /* =========================================================
    CIPHERVAULT — client-side encrypted credential store
    All crypto via native WebCrypto SubtleCrypto. Vault blob
-   persisted via window.storage (personal, not shared).
+   persisted via localStorage (see storage section below for why).
    ========================================================= */
 
 /* Diceware-style wordlist (1296 common English words, sampled for distinctness — not the literal EFF list, but functionally equivalent for passphrase generation). */
@@ -644,34 +647,53 @@ async function sha1Hex(str){
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
 }
 
-/* ---------------- storage (persistent, per-user) ---------------- */
-// Hard timeout on every storage call — if the underlying API ever hangs instead of
-// rejecting (which is what caused a prior bug: a stuck "Deriving key…" button that
-// never recovered), this forces it to fail visibly after 6s instead of freezing forever.
-function withTimeout(promise, ms, label){
-  return new Promise((resolve, reject)=>{
-    const timer = setTimeout(()=> reject(new Error((label||'Operation') + ' timed out')), ms);
-    Promise.resolve(promise).then(
-      v=>{ clearTimeout(timer); resolve(v); },
-      e=>{ clearTimeout(timer); reject(e); }
-    );
-  });
+/* ---------------- storage (persistent, per-user, via localStorage) ----------------
+   Earlier versions of this file used window.storage, an API that only exists inside
+   Claude's own in-chat artifact preview — NOT in a normal browser opening a downloaded
+   HTML file, which is how this tool is actually used. Switched to localStorage, the
+   standard browser API for exactly this. Falls back to an in-memory (non-persistent)
+   store if localStorage is blocked (e.g. some private-browsing modes, or very old
+   browsers), with a visible warning rather than silently losing data. */
+let memoryFallbackStore = {};
+let usingMemoryFallback = false;
+function testLocalStorage(){
+  try{
+    const k = '__ciphervault_test__';
+    localStorage.setItem(k, '1');
+    localStorage.removeItem(k);
+    return true;
+  }catch(e){ return false; }
+}
+function showStorageWarning(){
+  const el = document.getElementById('storageWarnBanner');
+  if(el) el.classList.remove('hidden');
 }
 async function storageGet(key){
-  try{ const r = await withTimeout(window.storage.get(key, false), 6000, 'storage read'); return r ? r.value : null; }
-  catch(e){ return null; }
+  if(usingMemoryFallback) return (key in memoryFallbackStore) ? memoryFallbackStore[key] : null;
+  try{ return localStorage.getItem(key); }
+  catch(e){ return (key in memoryFallbackStore) ? memoryFallbackStore[key] : null; }
 }
 async function storageSet(key, value){
-  try{ return await withTimeout(window.storage.set(key, value, false), 6000, 'storage write'); }
-  catch(e){ toast('Storage write failed: '+e.message, true); return null; }
+  if(usingMemoryFallback){ memoryFallbackStore[key] = value; return { key, value }; }
+  try{ localStorage.setItem(key, value); return { key, value }; }
+  catch(e){
+    toast('Storage write failed: '+e.message, true);
+    memoryFallbackStore[key] = value;
+    return null;
+  }
 }
 async function storageDelete(key){
-  try{ return await withTimeout(window.storage.delete(key, false), 6000, 'storage delete'); } catch(e){ return null; }
+  if(usingMemoryFallback){ delete memoryFallbackStore[key]; return { key, deleted:true }; }
+  try{ localStorage.removeItem(key); return { key, deleted:true }; }
+  catch(e){ return null; }
 }
 
 /* ---------------- boot ---------------- */
 window.addEventListener('DOMContentLoaded', boot);
 async function boot(){
+  usingMemoryFallback = !testLocalStorage();
+  if(usingMemoryFallback) showStorageWarning();
+
   const s = await storageGet(SETTINGS_KEY);
   if(s){ try{ settings = Object.assign({}, settings, JSON.parse(s)); }catch(e){} }
   document.getElementById('autoLockSelect').value = String(settings.autoLock);

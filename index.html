@@ -1322,7 +1322,7 @@ function renderFolderNav(){
   const folders = [...new Set(vault.items.filter(it=>!it.isDeleted).map(it=>it.folder).filter(Boolean))].sort();
   if(folders.length===0){ nav.innerHTML=''; header.classList.add('hidden'); return; }
   header.classList.remove('hidden');
-  nav.innerHTML = folders.map(f => `<div class="folder-nav-item ${currentFolder===f?'active':''}" data-folder="${esc(f)}" onclick="setFolder('${escJs(f)}')">📁 ${esc(f)}</div>`).join('');
+  nav.innerHTML = folders.map(f => `<div class="folder-nav-item ${currentFolder===f?'active':''}" data-folder="${esc(f)}" onclick="setFolder(this.dataset.folder)">📁 ${esc(f)}</div>`).join('');
 }
 function updateCounts(){
   const c = { all:0, login:0, card:0, note:0, recovery:0, totp:0, passkey:0, trash:0 };
@@ -1415,8 +1415,8 @@ function renderCard(it, reusedMap){
   if(it.type==='login'){
     const strength = estimateStrength(it.password);
     body = `
-      <div class="field"><span>username</span><span class="val">${esc(it.username||'—')} ${it.username?`<button class="copybtn" onclick="copyText('${escJs(it.username)}','username')">copy</button>`:''}</span></div>
-      <div class="field"><span>password</span><span class="val mono-mask">${it.password?'••••••••':'—'} ${it.password?`<button class="copybtn" onclick="copyText('${escJs(it.password)}','password')">copy</button>`:''}</span></div>
+      <div class="field"><span>username</span><span class="val">${esc(it.username||'—')} ${it.username?`<button class="copybtn" data-copy="${esc(it.username)}" onclick="copyText(this.dataset.copy,'username')">copy</button>`:''}</span></div>
+      <div class="field"><span>password</span><span class="val mono-mask">${it.password?'••••••••':'—'} ${it.password?`<button class="copybtn" data-copy="${esc(it.password)}" onclick="copyText(this.dataset.copy,'password')">copy</button>`:''}</span></div>
       ${it.url?`<div class="field"><span>url</span><span class="val">${esc(it.url)}</span></div>`:''}
     `;
     if(it.password){
@@ -1427,7 +1427,7 @@ function renderCard(it, reusedMap){
   } else if(it.type==='card'){
     const last4 = (it.number||'').replace(/\s/g,'').slice(-4);
     body = `
-      <div class="field"><span>number</span><span class="val">•••• •••• •••• ${last4||'----'} ${it.number?`<button class="copybtn" onclick="copyText('${escJs(it.number)}','card number')">copy</button>`:''}</span></div>
+      <div class="field"><span>number</span><span class="val">•••• •••• •••• ${last4||'----'} ${it.number?`<button class="copybtn" data-copy="${esc(it.number)}" onclick="copyText(this.dataset.copy,'card number')">copy</button>`:''}</span></div>
       <div class="field"><span>expiry</span><span class="val">${esc(it.expiry||'—')}</span></div>
       <div class="field"><span>cardholder</span><span class="val">${esc(it.cardholder||'—')}</span></div>
     `;
@@ -1448,8 +1448,8 @@ function renderCard(it, reusedMap){
       <div class="note-box info" style="margin-top:8px;font-size:10px;">Reference only — the actual passkey lives in your browser/OS/security key and can't be exported here.</div>
     `;
   }
-  const tagsHtml = (it.tags||[]).map(t=>`<span class="tag-chip" onclick="filterByTag('${escJs(t)}')">#${esc(t)}</span>`).join('');
-  const folderHtml = it.folder ? `<span class="folder-badge" onclick="setFolder('${escJs(it.folder)}')">📁 ${esc(it.folder)}</span>` : '';
+  const tagsHtml = (it.tags||[]).map(t=>`<span class="tag-chip" data-tag="${esc(t)}" onclick="filterByTag(this.dataset.tag)">#${esc(t)}</span>`).join('');
+  const folderHtml = it.folder ? `<span class="folder-badge" data-folder="${esc(it.folder)}" onclick="setFolder(this.dataset.folder)">📁 ${esc(it.folder)}</span>` : '';
   const html = `
     <div class="card bracket">
       <div class="row1">
@@ -1468,7 +1468,6 @@ function renderCard(it, reusedMap){
   if(it.type==='totp') setTimeout(()=>renderTotpCard(it), 0);
   return html;
 }
-function escJs(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
 /* ---------------- clipboard ---------------- */
 async function copyText(text, label){
@@ -1657,7 +1656,7 @@ function showModal(it, type){
       ${(it.history && it.history.length) ? `
         <div class="history-toggle" onclick="document.getElementById('historyList').classList.toggle('hidden')">▸ Password history (${it.history.length})</div>
         <div id="historyList" class="history-list hidden">
-          ${it.history.slice().reverse().map(h=>`<div class="history-row"><span class="h-pw">${esc(h.password)}</span><span class="h-date">${new Date(h.changedAt).toLocaleDateString()} <button class="copybtn" onclick="copyText('${escJs(h.password)}','old password')">copy</button></span></div>`).join('')}
+          ${it.history.slice().reverse().map(h=>`<div class="history-row"><span class="h-pw">${esc(h.password)}</span><span class="h-date">${new Date(h.changedAt).toLocaleDateString()} <button class="copybtn" data-copy="${esc(h.password)}" onclick="copyText(this.dataset.copy,'old password')">copy</button></span></div>`).join('')}
         </div>
       ` : ''}
     `;

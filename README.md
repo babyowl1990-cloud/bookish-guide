@@ -113,17 +113,18 @@ Added specifically against two threat scenarios: someone (or some script) repeat
 - **Anti-devtools / anti-inspection tricks** — things like disabling right-click or detecting an open console. These are widely considered security theater: they're trivially bypassed and mostly just annoy legitimate users. Skipped on purpose.
 
 ### Version history worth knowing about
-Two bugs were introduced and fixed during hardening, in case you're on an older copy of this file:
+Three bugs were introduced and fixed during hardening, in case you're on an older copy of this file:
 1. An added Content-Security-Policy blocked the storage mechanism entirely, freezing the "Deriving key…" button forever with no error. Fixed by removing the CSP.
 2. Persistence was originally built on `window.storage`, an API that only exists inside Claude's own in-chat preview — not in a real browser opening this file directly, which caused an immediate `"Cannot read properties of undefined (reading 'set')"` error. Fixed by switching to standard `localStorage`.
+3. **A real stored-XSS vulnerability**, found during a self-audit: usernames, card numbers, tags, folder names, and password-history entries were inserted into `onclick="..."` attributes using an escaper that didn't account for the surrounding double-quoted HTML attribute. A value containing a `"` character — typed manually, or delivered via a crafted CSV/backup import — could break out of the attribute and inject an arbitrary event handler that ran with full access to the decrypted vault in memory. Fixed by switching those to `data-*` attributes read via `element.dataset`, which eliminates the injection surface structurally rather than patching the escaping. If you imported any CSV files or backups from untrusted sources before this fix, it's worth reviewing those items' usernames/tags/folders for anything that looks like it contains `onmouseover=`, `onerror=`, or similar — that's a sign a prior import tried to exploit this.
 
-If you're running a copy from before both of these fixes, re-download the current version.
+If you're running a copy from before all three of these fixes, re-download the current version.
 
 ### Verifying this file hasn't been altered since I generated it
 If you're worried about malware modifying the `.html` file on disk after the fact, you can check it against this checksum:
 
 ```
-SHA-256: a4bad7be97d2aef6b57584d8268df240e651d30e56da190ab30f00e4bc3f00bf
+SHA-256: 8b64526ef2c0e9e1b19befba21d647165db90055e064d56c9a2c1bd0b2886500
 ```
 
 Verify with:

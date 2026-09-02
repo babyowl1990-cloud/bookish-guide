@@ -189,6 +189,14 @@ textarea{ resize:vertical; min-height:70px; }
 .modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
 
 .toast-wrap{ position:fixed; bottom:18px; right:18px; z-index:1000; display:flex; flex-direction:column; gap:8px; }
+.pulse-widget{
+  position:fixed; top:70px; right:18px; z-index:900; background:var(--panel); border:2px solid var(--yellow);
+  padding:14px 16px; text-align:center; box-shadow:0 0 20px #ffd23f44; min-width:150px;
+}
+.pulse-widget .pulse-time{ font-size:24px; color:var(--yellow); font-weight:bold; text-shadow:0 0 10px #ffd23f66; }
+.pulse-widget .pulse-label{ font-size:9.5px; color:var(--dim); letter-spacing:.1em; margin-bottom:6px; }
+.pulse-widget button{ margin-top:10px; width:100%; border-color:var(--yellow); color:var(--yellow); }
+.pulse-widget button:hover{ background:var(--yellow); color:#000; box-shadow:0 0 14px var(--yellow); }
 .toast{
   background:var(--panel2); border:1px solid var(--cyan); padding:10px 16px; font-size:12px; color:var(--text);
   box-shadow:0 0 14px #2de2ff33; animation:slidein .2s ease;
@@ -266,7 +274,7 @@ textarea{ resize:vertical; min-height:70px; }
 .kit-footer{ margin-top:30px; font-size:10px; color:var(--dim); border-top:1px solid var(--line); padding-top:14px; }
 @media print{
   body *{ visibility:hidden; }
-  .warn-banner, .scanlines, .toast-wrap{ display:none !important; }
+  .warn-banner, .scanlines, .toast-wrap, .pulse-widget{ display:none !important; }
   #emergencyKitView, #emergencyKitView *{ visibility:visible; }
   #emergencyKitView{ position:absolute; left:0; top:0; width:100%; }
   #emergencyKitView button{ display:none; }
@@ -399,6 +407,16 @@ textarea{ resize:vertical; min-height:70px; }
     <!-- SETTINGS VIEW -->
     <div id="settingsView" class="hidden">
       <div class="settings-block">
+        <h4>SECURITY LEVEL</h4>
+        <p>A shortcut that bundles the convenience/paranoia settings below into one click. You can still fine-tune anything individually afterward — this just sets sane starting points.</p>
+        <div style="display:flex;gap:8px;">
+          <button id="levelLowBtn" onclick="applySecurityLevel('low')">Low (convenience)</button>
+          <button id="levelMidBtn" onclick="applySecurityLevel('mid')">Mid (balanced)</button>
+          <button id="levelHighBtn" onclick="applySecurityLevel('high')">High (paranoid)</button>
+        </div>
+        <p style="color:var(--dim);font-size:10.5px;margin-top:10px;">This never touches Self-Destruct or Wipe-on-missed-pulse, at any level — those stay off until you turn them on yourself, deliberately, further down this page. A convenience shortcut should never be how something irreversible gets switched on.</p>
+      </div>
+      <div class="settings-block">
         <h4>AUTO-LOCK</h4>
         <p>Lock the vault automatically after inactivity. Data stays encrypted on disk at all times — this just clears the decryption key from memory.</p>
         <select id="autoLockSelect" onchange="saveSettings()">
@@ -411,6 +429,7 @@ textarea{ resize:vertical; min-height:70px; }
       <div class="settings-block">
         <h4>CLIPBOARD</h4>
         <div class="checkbox-row"><input type="checkbox" id="clipClearChk" checked onchange="saveSettings()"> Auto-clear clipboard <input type="number" id="clipClearSecs" value="20" style="width:60px;margin-left:6px;" onchange="saveSettings()"> seconds after copy</div>
+        <div class="note-box warn2" style="margin-top:10px;">This only clears the <i>live</i> clipboard. It cannot reach Windows' Clipboard History (Win+V), macOS clipboard managers, or any clipboard-sync service — those keep their own independent record the moment you copy, and no webpage has the access needed to purge them. If that worries you, clear or disable clipboard history yourself: Windows → Win+V → "Clear all"; or turn it off entirely in Settings → System → Clipboard.</div>
       </div>
       <div class="settings-block">
         <h4>LOCK ON FOCUS LOSS</h4>
@@ -461,6 +480,42 @@ textarea{ resize:vertical; min-height:70px; }
         </div>
         <input type="file" id="importCsvFile" class="hidden" accept=".csv,text/csv" onchange="importCsv(event)">
         <div class="note-box warn2">The exported file is not encrypted. Only logins (title/url/username/password/notes) transfer this way — cards, notes, recovery codes and 2FA secrets stay in the encrypted backup only, since most other managers don't have a matching field for them.</div>
+      </div>
+      <div class="settings-block">
+        <h4>DEAD MAN'S SWITCH (PULSE LOCK)</h4>
+        <p>Off by default. When on, the vault demands an active "I'm still here" confirmation every N minutes — regardless of mouse movement — instead of only reacting to idleness. Meant for the specific scenario where someone else has physical access to an unlocked, unattended screen and is deliberately keeping it awake.</p>
+        <p style="color:var(--dim);font-size:10.5px;">Reality check: this doesn't stop someone who coerces <i>you</i> into pulsing it for them, and a high false-positive rate (bathroom break, phone call) is the real cost — weigh that against your actual threat model before turning it on.</p>
+        <div class="checkbox-row"><input type="checkbox" id="pulseLockChk" onchange="onPulseLockToggle()"> Enable Pulse Lock</div>
+        <div id="pulseLockOptions" class="hidden" style="margin-top:10px;">
+          <label>Pulse interval</label>
+          <select id="pulseIntervalSelect" onchange="saveSettings()">
+            <option value="120000">2 minutes</option>
+            <option value="300000">5 minutes</option>
+            <option value="600000" selected>10 minutes</option>
+            <option value="900000">15 minutes</option>
+          </select>
+          <label>On missed pulse</label>
+          <select id="pulseActionSelect" onchange="onPulseActionChange()">
+            <option value="lock" selected>Lock the vault (safe default)</option>
+            <option value="wipe">Wipe the vault permanently</option>
+          </select>
+          <div id="pulseWipeWarning" class="note-box warn2 hidden">Wipe-on-missed-pulse is irreversible and has no undo. A missed pulse from stepping away, a browser hiccup, or your laptop sleeping looks identical to an actual threat to this feature — there is no way to tell them apart. I'd genuinely recommend leaving this on "Lock" unless you've thought hard about that trade-off.</div>
+        </div>
+      </div>
+      <div class="settings-block">
+        <h4 style="color:var(--red);">SELF-DESTRUCT</h4>
+        <p>Off by default. When on, the vault wipes itself permanently after a set number of consecutive wrong-password attempts — on top of the escalating lockout that already applies to everyone.</p>
+        <p style="color:var(--dim);font-size:10.5px;">Reality check: this defends against someone trying to brute-force in. It does nothing against someone who just wants to destroy your data and doesn't care about reading it — for most people, entering their own password wrong too many times (tired, autocorrect, a kid at the keyboard) is a far more likely trigger than an actual attacker. Test it in dry-run mode first.</p>
+        <div class="checkbox-row"><input type="checkbox" id="selfDestructChk" onchange="onSelfDestructToggle()"> Enable Self-Destruct</div>
+        <div id="selfDestructOptions" class="hidden" style="margin-top:10px;">
+          <label>Trigger after this many consecutive wrong passwords</label>
+          <input type="number" id="selfDestructThreshold" value="10" min="4" max="50" style="width:100px;" onchange="saveSettings()">
+          <div class="checkbox-row" style="margin-top:12px;">
+            <input type="checkbox" id="selfDestructDryRun" checked onchange="updateSelfDestructLiveWarning(); saveSettings();">
+            <span><b>Dry run</b> — simulate the trigger without deleting anything (just shows a banner). Turn this off only once you've tested it and are sure.</span>
+          </div>
+          <div id="selfDestructLiveWarning" class="note-box warn2 hidden">🔴 LIVE — dry run is OFF. Reaching the threshold above will permanently delete this vault, no further confirmation, no undo.</div>
+        </div>
       </div>
       <div class="settings-block">
         <h4 style="color:var(--red);">DANGER ZONE</h4>
@@ -524,6 +579,12 @@ textarea{ resize:vertical; min-height:70px; }
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+<div id="pulseWidget" class="pulse-widget hidden">
+  <div class="pulse-label">⏱ PULSE REQUIRED</div>
+  <div class="pulse-time" id="pulseTimeLeft">--:--</div>
+  <button onclick="sendPulse()">Pulse ✓ (I'm here)</button>
+  <div style="font-size:9px;color:var(--dim);margin-top:6px;">Alt+P</div>
+</div>
 
 <script>
 /* =========================================================
@@ -561,8 +622,142 @@ function filterByTag(tag){
   renderItems();
 }
 let autoLockTimer = null;
-let settings = { autoLock: 300000, clipClear: true, clipClearSecs: 20, lockOnBlur: true, publicNetworkMode: false };
+let settings = {
+  autoLock: 300000, clipClear: true, clipClearSecs: 20, lockOnBlur: true, publicNetworkMode: false,
+  pulseLock: { enabled: false, intervalMs: 600000, action: 'lock' },
+  selfDestruct: { enabled: false, threshold: 10, dryRun: true }
+};
 const PUBLIC_MODE_AUTOLOCK_CAP = 60000; // 1 minute — hard ceiling while Public Network Mode is on
+
+/* ---------------- shared confirmation gate for anything irreversible ---------------- */
+async function confirmDestructiveEnable(featureName, phrase){
+  const typed = prompt(`Enabling ${featureName} can permanently delete this vault with no undo. Type "${phrase}" to confirm you understand:`);
+  return typed === phrase;
+}
+
+/* ---------------- Security Level presets — never touches Self-Destruct or wipe-on-pulse ---------------- */
+async function applySecurityLevel(level){
+  const presets = {
+    low:  { autoLock: 900000, lockOnBlur: false, pulseEnabled: false },
+    mid:  { autoLock: 300000, lockOnBlur: true,  pulseEnabled: false },
+    high: { autoLock: 60000,  lockOnBlur: true,  pulseEnabled: true, pulseInterval: 600000 }
+  };
+  const p = presets[level];
+  if(!p) return;
+  settings.autoLock = p.autoLock;
+  settings.lockOnBlur = p.lockOnBlur;
+  settings.pulseLock.enabled = !!p.pulseEnabled;
+  if(p.pulseInterval) settings.pulseLock.intervalMs = p.pulseInterval;
+  settings.pulseLock.action = 'lock'; // presets never arm the wipe action
+  document.getElementById('autoLockSelect').value = String(settings.autoLock);
+  document.getElementById('lockOnBlurChk').checked = settings.lockOnBlur;
+  document.getElementById('pulseLockChk').checked = settings.pulseLock.enabled;
+  document.getElementById('pulseIntervalSelect').value = String(settings.pulseLock.intervalMs);
+  document.getElementById('pulseActionSelect').value = 'lock';
+  document.getElementById('pulseLockOptions').classList.toggle('hidden', !settings.pulseLock.enabled);
+  document.getElementById('pulseWipeWarning').classList.add('hidden');
+  await storageSet(SETTINGS_KEY, JSON.stringify(settings));
+  applyPublicNetworkModeUI();
+  resetAutoLock();
+  restartPulseTimer();
+  toast(`Security level set to ${level.toUpperCase()}.`);
+}
+
+/* ---------------- Pulse Lock (dead man's switch) ---------------- */
+let pulseTimer = null;
+let pulseDeadline = 0;
+function onPulseLockToggle(){
+  const chk = document.getElementById('pulseLockChk');
+  document.getElementById('pulseLockOptions').classList.toggle('hidden', !chk.checked);
+  settings.pulseLock.enabled = chk.checked;
+  saveSettings();
+  restartPulseTimer();
+}
+async function onPulseActionChange(){
+  const sel = document.getElementById('pulseActionSelect');
+  const warn = document.getElementById('pulseWipeWarning');
+  if(sel.value === 'wipe'){
+    const ok = await confirmDestructiveEnable('wipe-on-missed-pulse', 'WIPE ON TIMEOUT');
+    if(!ok){ sel.value = 'lock'; warn.classList.add('hidden'); toast('Left on Lock — confirmation phrase didn\'t match.'); saveSettings(); return; }
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+  saveSettings();
+}
+function restartPulseTimer(){
+  clearInterval(pulseTimer);
+  const widget = document.getElementById('pulseWidget');
+  if(!settings.pulseLock.enabled || !masterKey){
+    if(widget) widget.classList.add('hidden');
+    return;
+  }
+  pulseDeadline = Date.now() + settings.pulseLock.intervalMs;
+  if(widget) widget.classList.remove('hidden');
+  pulseTimer = setInterval(tickPulse, 1000);
+  tickPulse();
+}
+function sendPulse(){
+  if(!settings.pulseLock.enabled) return;
+  pulseDeadline = Date.now() + settings.pulseLock.intervalMs;
+  toast('Pulse confirmed.');
+}
+document.addEventListener('keydown', (e)=>{
+  if(e.altKey && e.key.toLowerCase() === 'p' && settings.pulseLock.enabled && masterKey){
+    sendPulse();
+  }
+});
+async function tickPulse(){
+  const remaining = pulseDeadline - Date.now();
+  const el = document.getElementById('pulseTimeLeft');
+  if(remaining <= 0){
+    clearInterval(pulseTimer);
+    document.getElementById('pulseWidget').classList.add('hidden');
+    if(settings.pulseLock.action === 'wipe'){
+      await performWipe('missed-pulse');
+    } else {
+      lockVault();
+      toast('Vault locked — no pulse received in time.');
+    }
+    return;
+  }
+  if(el){
+    const m = Math.floor(remaining/60000), s = Math.floor((remaining%60000)/1000);
+    el.textContent = `${m}:${String(s).padStart(2,'0')}`;
+  }
+}
+
+/* ---------------- Self-Destruct on repeated failed unlocks ---------------- */
+async function onSelfDestructToggle(){
+  const chk = document.getElementById('selfDestructChk');
+  const opts = document.getElementById('selfDestructOptions');
+  if(chk.checked){
+    const ok = await confirmDestructiveEnable('Self-Destruct', 'DESTROY MY VAULT');
+    if(!ok){ chk.checked = false; toast('Left off — confirmation phrase didn\'t match.'); return; }
+    opts.classList.remove('hidden');
+    document.getElementById('selfDestructDryRun').checked = true; // always re-arm in dry-run first, every time
+  } else {
+    opts.classList.add('hidden');
+  }
+  settings.selfDestruct.enabled = chk.checked;
+  saveSettings();
+}
+function updateSelfDestructLiveWarning(){
+  const dryRun = document.getElementById('selfDestructDryRun').checked;
+  document.getElementById('selfDestructLiveWarning').classList.toggle('hidden', dryRun);
+}
+// Called from recordFailedAttempt() below once the threshold is reached.
+async function maybeTriggerSelfDestruct(state){
+  if(!settings.selfDestruct.enabled) return;
+  if(state.failedAttempts < settings.selfDestruct.threshold) return;
+  if(settings.selfDestruct.dryRun){
+    toast(`🔥 SELF-DESTRUCT WOULD TRIGGER NOW — dry run is on, nothing was deleted. (${state.failedAttempts} failed attempts)`, true);
+    return;
+  }
+  toast('Self-Destruct threshold reached. Wiping vault.', true);
+  await performWipe('self-destruct');
+}
+
 
 /* ---------------- utility ---------------- */
 function toast(msg, isErr){
@@ -722,6 +917,23 @@ async function boot(){
   if(publicModeChk) publicModeChk.checked = settings.publicNetworkMode;
   applyPublicNetworkModeUI();
 
+  const pulseChk = document.getElementById('pulseLockChk');
+  if(pulseChk){
+    pulseChk.checked = settings.pulseLock.enabled;
+    document.getElementById('pulseIntervalSelect').value = String(settings.pulseLock.intervalMs);
+    document.getElementById('pulseActionSelect').value = settings.pulseLock.action;
+    document.getElementById('pulseLockOptions').classList.toggle('hidden', !settings.pulseLock.enabled);
+    document.getElementById('pulseWipeWarning').classList.toggle('hidden', settings.pulseLock.action !== 'wipe');
+  }
+  const sdChk = document.getElementById('selfDestructChk');
+  if(sdChk){
+    sdChk.checked = settings.selfDestruct.enabled;
+    document.getElementById('selfDestructThreshold').value = settings.selfDestruct.threshold;
+    document.getElementById('selfDestructDryRun').checked = settings.selfDestruct.dryRun;
+    document.getElementById('selfDestructOptions').classList.toggle('hidden', !settings.selfDestruct.enabled);
+    updateSelfDestructLiveWarning();
+  }
+
   await cleanupTrash();
   const raw = await storageGet(STORAGE_KEY);
   document.getElementById('authScreen').classList.remove('hidden');
@@ -749,6 +961,7 @@ async function recordFailedAttempt(){
     state.lockedUntil = Date.now() + delaySec*1000;
   }
   await storageSet(LOCKOUT_KEY, JSON.stringify(state));
+  await maybeTriggerSelfDestruct(state);
   return state;
 }
 async function clearLockoutState(){
@@ -918,6 +1131,7 @@ function lockVault(){
   masterKey = null;
   vault = null;
   clearTimeout(autoLockTimer);
+  restartPulseTimer(); // masterKey is now null, so this clears the pulse timer and hides the widget
   document.getElementById('appScreen').classList.add('hidden');
   document.getElementById('authScreen').classList.remove('hidden');
   document.getElementById('setupCard').classList.add('hidden');
@@ -1062,6 +1276,7 @@ function enterApp(){
   document.getElementById('statusPill').textContent = '● UNLOCKED';
   document.getElementById('statusPill').className = 'status-pill unlocked';
   resetAutoLock();
+  restartPulseTimer();
   renderAll();
   checkWifiHint();
 }
@@ -1094,13 +1309,19 @@ async function saveVaultToDisk(){
 }
 
 /* ---------------- panic wipe / backup ---------------- */
+async function performWipe(reason){
+  await storageDelete(STORAGE_KEY);
+  await storageDelete(BIOMETRIC_KEY);
+  masterKey = null; vault = null;
+  // no toast here — caller decides what the person sees, since automatic triggers
+  // need a different message than a manual panic wipe does
+  setTimeout(()=> location.reload(), 800);
+}
 async function confirmPanicWipe(){
   if(!confirm('PANIC WIPE: This permanently deletes the vault from this device. This cannot be undone unless you have an exported backup. Continue?')) return;
   if(!confirm('Are you absolutely sure? Type OK in the next prompt to confirm.')) return;
-  await storageDelete(STORAGE_KEY);
-  masterKey = null; vault = null;
   toast('Vault wiped.');
-  location.reload();
+  await performWipe('manual');
 }
 async function exportBackup(){
   const raw = await storageGet(STORAGE_KEY);
@@ -1311,9 +1532,22 @@ function saveSettings(){
   if(lockOnBlurChk) settings.lockOnBlur = lockOnBlurChk.checked;
   const publicModeChk = document.getElementById('publicModeChk');
   if(publicModeChk) settings.publicNetworkMode = publicModeChk.checked;
+  const pulseChk = document.getElementById('pulseLockChk');
+  if(pulseChk){
+    settings.pulseLock.enabled = pulseChk.checked;
+    settings.pulseLock.intervalMs = parseInt(document.getElementById('pulseIntervalSelect').value, 10);
+    settings.pulseLock.action = document.getElementById('pulseActionSelect').value;
+  }
+  const sdChk = document.getElementById('selfDestructChk');
+  if(sdChk){
+    settings.selfDestruct.enabled = sdChk.checked;
+    settings.selfDestruct.threshold = Math.max(4, parseInt(document.getElementById('selfDestructThreshold').value, 10) || 10);
+    settings.selfDestruct.dryRun = document.getElementById('selfDestructDryRun').checked;
+  }
   storageSet(SETTINGS_KEY, JSON.stringify(settings));
   applyPublicNetworkModeUI();
   resetAutoLock();
+  restartPulseTimer();
 }
 
 /* ---------------- Public Network Mode (manual toggle — see settings copy for why there's no real detection) ---------------- */
